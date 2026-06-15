@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  # POSIX runners: Ubuntu + macOS. GNU make is available, so `make ci` runs
+  # the full chain (lint, unit tests, e2e, lock checks, build).
+  posix:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+
+      - name: Lint + type-check
+        run: make lint-ci
+
+      - name: Unit tests
+        run: make test
+
+      - name: Integration tests
+        run: make test-integration
+
+      - name: Build wheel
+        run: make build
+
+  # Windows runner: GNU make isn't standard on windows-latest. Invoke each
+  # check directly via uv so the workflow stays portable.
+  windows:
+    name: windows-latest
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+
+      - name: Lint + type-check
+        run: |
+          uv run ruff format --check src tests tests_integration
+          uv run ruff check src tests tests_integration
+          uv run mypy src tests tests_integration
+
+      - name: Unit tests
+        run: uv run python -m unittest discover -s tests -t .
+
+      - name: Integration tests
+        run: uv run python -m unittest discover -s tests_integration -t .
+
+      - name: Build wheel
+        run: uv build
+
+  lock-check:
+    name: uv.lock drift
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Verify lockfile is in sync with pyproject.toml
+        run: make lock-check
+
+      - name: Verify bundled workspace lockfile is in sync with its pyproject.toml
+        run: make scaffold-lock-check
