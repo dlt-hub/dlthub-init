@@ -68,6 +68,14 @@ class ApplyScaffoldTest(unittest.TestCase):
             apply_scaffold(self.project_dir, scaffold=SCAFFOLD, flags=Flags())
         self.assertEqual(edited.read_text(encoding="utf-8"), "USER OWNED")
 
+    def test_existing_pyproject_does_not_block_and_skips_lock(self):
+        existing = self.project_dir / "pyproject.toml"
+        existing.write_text("USER OWNED", encoding="utf-8")
+        apply_scaffold(self.project_dir, scaffold=SCAFFOLD, flags=Flags())
+        self.assertEqual(existing.read_text(encoding="utf-8"), "USER OWNED")
+        self.assertFalse((self.project_dir / "uv.lock").exists())
+        self.assertTrue((self.project_dir / ".dlt/.workspace").exists())
+
     def test_merge_appends_missing_gitignore_entries(self):
         gitignore = self.project_dir / ".gitignore"
         gitignore.write_text("custom-rule/\n", encoding="utf-8")

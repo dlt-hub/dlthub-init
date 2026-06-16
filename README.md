@@ -37,10 +37,14 @@ install dependencies with `uv`.
 `dlthub-init` is safe to run in an existing directory:
 
 - Missing files are **created**.
-- An existing `.gitignore` is **skipped** (or **merged** with `--merge`).
-- An existing secrets file (`.dlt/secrets.toml`) is **never** touched.
-- Any other existing generated file is a **hard collision**: the run stops
-  before writing anything (override with `--force`).
+- The run stops only if `.dlt/.workspace` already exists — the directory is
+  already a dltHub workspace (override with `--force`).
+- Otherwise existing files are **left alone** and reported as skipped: your
+  `pyproject.toml`, `.dlt/config.toml`, and `.dlt/secrets.toml` are never
+  overwritten, and `.gitignore` is skipped (or **merged** with `--merge`).
+- `uv.lock` is written only when `pyproject.toml` is created, so the lockfile
+  always matches the workspace's dependencies.
+- `--force` overwrites the generated files (never secrets).
 
 ## Development
 

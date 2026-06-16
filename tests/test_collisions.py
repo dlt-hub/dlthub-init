@@ -39,17 +39,48 @@ class CollisionPlanTest(unittest.TestCase):
         self.assertTrue(all(p.outcome is Outcome.CREATE for p in plan))
         self.assertEqual(conflicts(plan), [])
 
-    def test_existing_generated_file_conflicts(self):
-        self._touch(PYPROJECT)
+    def test_only_workspace_marker_conflicts(self):
+        self._touch(WORKSPACE)
         plan = self.plan()
-        self.assertIs(outcome_for(plan, PYPROJECT), Outcome.CONFLICT)
-        self.assertIn(str(PYPROJECT), conflicts(plan))
+        self.assertIs(outcome_for(plan, WORKSPACE), Outcome.CONFLICT)
+        self.assertEqual(conflicts(plan), [str(WORKSPACE)])
 
-    def test_force_overwrites_generated_file(self):
+    def test_existing_pyproject_and_config_are_skipped_not_conflict(self):
         self._touch(PYPROJECT)
+        self._touch(CONFIG)
+        plan = self.plan()
+        self.assertIs(outcome_for(plan, PYPROJECT), Outcome.SKIP)
+        self.assertIs(outcome_for(plan, CONFIG), Outcome.SKIP)
+        self.assertEqual(conflicts(plan), [])
+
+    def test_force_overwrites_generated_files(self):
+        self._touch(PYPROJECT)
+        self._touch(WORKSPACE)
         plan = self.plan(Flags(force=True))
         self.assertIs(outcome_for(plan, PYPROJECT), Outcome.OVERWRITE)
+        self.assertIs(outcome_for(plan, WORKSPACE), Outcome.OVERWRITE)
         self.assertEqual(conflicts(plan), [])
+
+    def test_lock_dropped_when_pyproject_skipped_and_absent(self):
+        self._touch(PYPROJECT)
+        plan = self.plan()
+        self.assertIs(outcome_for(plan, PYPROJECT), Outcome.SKIP)
+        self.assertNotIn(LOCK, [p.relative for p in plan])
+
+    def test_existing_lock_preserved_when_pyproject_skipped(self):
+        self._touch(PYPROJECT)
+        self._touch(LOCK)
+        self.assertIs(outcome_for(self.plan(), LOCK), Outcome.SKIP)
+
+    def test_lock_created_with_pyproject_in_empty_dir(self):
+        plan = self.plan()
+        self.assertIs(outcome_for(plan, PYPROJECT), Outcome.CREATE)
+        self.assertIs(outcome_for(plan, LOCK), Outcome.CREATE)
+
+    def test_lock_dropped_with_no_pyproject_flag(self):
+        plan = self.plan(Flags(no_pyproject=True))
+        self.assertIs(outcome_for(plan, PYPROJECT), Outcome.DISABLED)
+        self.assertNotIn(LOCK, [p.relative for p in plan])
 
     def test_existing_secret_is_skipped_not_conflict(self):
         self._touch(SECRETS)

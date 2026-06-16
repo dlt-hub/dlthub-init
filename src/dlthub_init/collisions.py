@@ -1,8 +1,4 @@
-"""Non-destructive write planning for `dlthub-init`.
-
-Before writing anything, classify every path the scaffold would touch so the run
-can abort cleanly on a hard collision instead of clobbering user files.
-"""
+"""Non-destructive write planning for `dlthub-init`."""
 
 from __future__ import annotations
 
@@ -11,13 +7,10 @@ from enum import Enum
 from pathlib import Path
 
 PYPROJECT = Path("pyproject.toml")
+UV_LOCK = Path("uv.lock")
 GITIGNORE = Path(".gitignore")
-
-# Never written when present, never the cause of a hard failure (the scaffold
-# ship empty templates; a real secrets file is left untouched).
+WORKSPACE_MARKER = Path(".dlt") / ".workspace"
 SECRET_FILES = frozenset({Path(".dlt") / "secrets.toml"})
-
-# Additively updatable when present (with --merge); otherwise skipped.
 MERGEABLE_FILES = frozenset({GITIGNORE})
 
 
@@ -45,7 +38,9 @@ class PlannedPath:
 
 
 def build_plan(relatives: list[Path], project_dir: Path, flags: Flags) -> list[PlannedPath]:
-    return [PlannedPath(rel, _classify(rel, project_dir, flags)) for rel in sorted(relatives)]
+    outcomes = {rel: _classify(rel, project_dir, flags) for rel in relatives}
+    _couple_lock_to_pyproject(outcomes, project_dir)
+    return [PlannedPath(rel, outcomes[rel]) for rel in sorted(outcomes)]
 
 
 def conflicts(plan: list[PlannedPath]) -> list[str]:
@@ -55,15 +50,29 @@ def conflicts(plan: list[PlannedPath]) -> list[str]:
 def _classify(rel: Path, project_dir: Path, flags: Flags) -> Outcome:
     if _disabled_by_flag(rel, flags):
         return Outcome.DISABLED
-
-    exists = (project_dir / rel).exists()
-    if rel in SECRET_FILES:
-        return Outcome.CREATE if not exists else Outcome.SKIP
-    if not exists:
+    if not (project_dir / rel).exists():
         return Outcome.CREATE
+    if rel in SECRET_FILES:
+        return Outcome.SKIP
     if rel in MERGEABLE_FILES:
         return Outcome.MERGE if flags.merge else Outcome.SKIP
-    return Outcome.OVERWRITE if flags.force else Outcome.CONFLICT
+    if flags.force:
+        return Outcome.OVERWRITE
+    if rel == WORKSPACE_MARKER:
+        return Outcome.CONFLICT
+    return Outcome.SKIP
+
+
+def _couple_lock_to_pyproject(outcomes: dict[Path, Outcome], project_dir: Path) -> None:
+    # The bundled uv.lock only matches the bundled pyproject, so ship them together.
+    if UV_LOCK not in outcomes:
+        return
+    if outcomes.get(PYPROJECT) in (Outcome.CREATE, Outcome.OVERWRITE):
+        outcomes[UV_LOCK] = Outcome.OVERWRITE if (project_dir / UV_LOCK).exists() else Outcome.CREATE
+    elif (project_dir / UV_LOCK).exists():
+        outcomes[UV_LOCK] = Outcome.SKIP
+    else:
+        del outcomes[UV_LOCK]
 
 
 def _disabled_by_flag(rel: Path, flags: Flags) -> bool:
