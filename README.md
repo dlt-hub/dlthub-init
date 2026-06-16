@@ -34,7 +34,7 @@ install dependencies with `uv`.
 
 ## Collision behavior
 
-See [`COLLISION_PLAN.md`](./COLLISION_PLAN.md) for the full policy. In short:
+`dlthub-init` is safe to run in an existing directory:
 
 - Missing files are **created**.
 - An existing `.gitignore` is **skipped** (or **merged** with `--merge`).

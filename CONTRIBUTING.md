@@ -19,7 +19,7 @@ make ci       # everything CI runs
 
 - `src/dlthub_init/` — the CLI. `cli.py` orchestrates the flow; `scaffold.py`
   enumerates and writes the payload; `collisions.py` implements the
-  non-destructive write policy (see `COLLISION_PLAN.md`).
+  non-destructive write policy.
 - `src/dlthub_init/scaffolds/minimal_workspace/` — the bundled workspace copied
   into the user's directory.
 - `tests/` — fast unit tests. `tests_integration/` — slow end-to-end tests that
