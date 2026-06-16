@@ -28,10 +28,10 @@ class CliFilesOnlyTest(unittest.TestCase):
         self.assertTrue((self.project_dir / "uv.lock").exists())
         self.assertTrue((self.project_dir / ".dlt/config.toml").exists())
 
-    def test_workspace_name_set_to_dir_name(self):
+    def test_config_has_no_workspace_name(self):
         self.run_cli()
         config = (self.project_dir / ".dlt/config.toml").read_text(encoding="utf-8")
-        self.assertIn('name = "ws"', config)
+        self.assertNotIn("[workspace.settings]", config)
 
     def test_pyproject_name_stays_static(self):
         self.run_cli()

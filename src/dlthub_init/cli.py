@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from . import strings
-from .collisions import Flags, Outcome, PlannedPath
+from .collisions import Flags
 from .config import DEFAULT_SCAFFOLD
 from .display import (
     console,
@@ -20,7 +20,6 @@ from .display import (
     substep_detail,
 )
 from .errors import CollisionError, UvError, WorkspaceError
-from .project_metadata import CONFIG_PATH, apply_workspace_name
 from .prompts import confirm
 from .scaffold import apply_scaffold, resolve_target
 from .skills import install_skills
@@ -133,9 +132,6 @@ def run(args: argparse.Namespace) -> None:
     print_header(project_dir)
 
     plan = apply_scaffold(project_dir, scaffold=scaffold, flags=flags)
-    if _written(plan, CONFIG_PATH):
-        workspace_name = apply_workspace_name(project_dir, project_dir.name)
-        substep_detail(strings.MSG_WORKSPACE_NAME.format(workspace_name=workspace_name))
     installed_skills = install_skills(project_dir)
     print_summary(plan)
     if installed_skills:
@@ -168,10 +164,6 @@ def _maybe_sync(project_dir: Path, args: argparse.Namespace, *, verbose: bool) -
         console.print(strings.MSG_SYNC_FAILED.format(message=exc))
         return False
     return True
-
-
-def _written(plan: list[PlannedPath], relative: Path) -> bool:
-    return any(p.relative == relative and p.outcome in (Outcome.CREATE, Outcome.OVERWRITE) for p in plan)
 
 
 if __name__ == "__main__":
