@@ -70,14 +70,16 @@ LABEL_MERGED = "Updated"
 LABEL_SKIPPED = "Skipped (already exist)"
 LABEL_DISABLED = "Skipped (disabled by flag)"
 LABEL_NEXT_STEPS = "Next steps"
+LABEL_NEXT_STEP = "Next step"
 
 
 # Step labels / commands ------------------------------------------------
 STEPS_LABEL_CD = "Change into the workspace:"
 STEPS_LABEL_INSTALL_UV = "Install uv:"
 STEPS_LABEL_INSTALL_DEPS = "Install dependencies:"
-STEPS_LABEL_ADD_SECRETS = "Add your credentials to [bold].dlt/secrets.toml[/bold]."
-STEPS_LABEL_BUILD = "Build your first pipeline with your coding agent or the dltHub docs."
+STEPS_LABEL_OPEN_AGENT = (
+    "Open your coding agent (Claude Code, Cursor, Codex, …) in this workspace and tell it what to build."
+)
 
 CMD_INSTALL_UV_UNIX = "curl -LsSf https://astral.sh/uv/install.sh | sh"
 CMD_UV_SYNC = "uv sync"

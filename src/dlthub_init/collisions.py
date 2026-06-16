@@ -1,8 +1,7 @@
 """Non-destructive write planning for `dlthub-init`.
 
 Before writing anything, classify every path the scaffold would touch so the run
-can abort cleanly on a hard collision instead of clobbering user files. See
-COLLISION_PLAN.md for the policy this implements.
+can abort cleanly on a hard collision instead of clobbering user files.
 """
 
 from __future__ import annotations

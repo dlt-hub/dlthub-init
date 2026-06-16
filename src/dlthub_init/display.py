@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterator
 
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from . import strings
@@ -77,14 +78,16 @@ def print_next_steps(project_dir: Path, *, synced: bool, uv_installed: bool) -> 
         if not uv_installed:
             steps.append((strings.STEPS_LABEL_INSTALL_UV, strings.CMD_INSTALL_UV_UNIX))
         steps.append((strings.STEPS_LABEL_INSTALL_DEPS, strings.CMD_UV_SYNC))
-    steps.append((strings.STEPS_LABEL_ADD_SECRETS, None))
-    steps.append((strings.STEPS_LABEL_BUILD, None))
+    steps.append((strings.STEPS_LABEL_OPEN_AGENT, None))
 
-    console.print(f"\n[bold #C6D300]{strings.LABEL_NEXT_STEPS}[/bold #C6D300]")
+    single = len(steps) == 1
+    header = strings.LABEL_NEXT_STEP if single else strings.LABEL_NEXT_STEPS
+    console.print(f"\n[bold #C6D300]{header}[/bold #C6D300]")
     for index, (label, command) in enumerate(steps, start=1):
-        console.print(f"  {index}. {label}")
+        prefix = "" if single else f"{index}. "
+        console.print(f"  {prefix}{label}")
         if command is not None:
-            console.print(f"     [bold #59C1D5]{command}[/bold #59C1D5]")
+            console.print(f"     [bold #59C1D5]{escape(command)}[/bold #59C1D5]")
 
 
 def print_collision(conflicts: list[str]) -> None:
