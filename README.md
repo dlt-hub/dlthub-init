@@ -1,4 +1,4 @@
-# dlthub-init
+# dlthub-init (beta)
 
 Scaffold a [dltHub](https://dlthub.com) workspace into a new or existing directory.
 
