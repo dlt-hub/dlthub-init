@@ -55,7 +55,8 @@ warn_return_any = true
 namespace_packages = true
 warn_unused_ignores = true
 show_error_codes = true
-files = ["src", "tests", "tests_integration"]
+files = ["src", "tests", "tests_integration", "scripts"]
+mypy_path = "scripts"
 exclude = ["src/dlthub_init/scaffolds"]
 
 [[tool.mypy.overrides]]

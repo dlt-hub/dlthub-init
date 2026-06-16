@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist publish ci lock-upgrade lock-check scaffold-lock-upgrade scaffold-lock-check workspace workspace-init
+.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist publish ci lock-upgrade lock-check scaffold-lock-upgrade scaffold-lock-check generate-skills update-skills check-skills workspace workspace-init
 
-PYTHON_SOURCES := src tests tests_integration
+PYTHON_SOURCES := src tests tests_integration scripts
 SCAFFOLD_DIR ?= src/dlthub_init/scaffolds/minimal_workspace
 
 help: ## Show this help message
@@ -97,4 +97,32 @@ scaffold-lock-check: ## CI guard: fail if the bundled workspace uv.lock is out o
 		exit 1; \
 	fi
 
-ci: lint-ci test test-integration lock-check scaffold-lock-check build ## Run all CI checks locally
+#
+# Skills (pulled from the dltHub AI workbench)
+#
+
+generate-skills: ## Populate skills/ from the dltHub AI workbench at the pinned WORKBENCH_REF
+	uv run python scripts/generate_skills.py
+
+update-skills: ## Bump the workbench ref (REF=<sha>, or latest) and regenerate skills/
+	uv run python scripts/update_skills.py $(REF)
+
+check-skills: ## CI guard: fail if skills/ differs from the generated output
+	@echo "check-skills: regenerating skills/ (output hidden unless it fails)…"; \
+	log="$$(mktemp)"; \
+	if ! uv run python scripts/generate_skills.py >"$$log" 2>&1; then \
+		echo "check-skills: generate-skills failed — its output:"; \
+		cat "$$log"; rm -f "$$log"; exit 1; \
+	fi; \
+	rm -f "$$log"; \
+	changed="$$(git status --porcelain -- skills)"; \
+	if [ -z "$$changed" ]; then \
+		echo "check-skills: OK — skills/ is up to date."; \
+	else \
+		echo "check-skills: FAILED — skills/ differs from 'make generate-skills'; regenerate and commit:"; \
+		printf '%s\n' "$$changed" | sed 's/^/    /'; \
+		git --no-pager diff -- skills; \
+		exit 1; \
+	fi
+
+ci: lint-ci test test-integration lock-check scaffold-lock-check check-skills build ## Run all CI checks locally
