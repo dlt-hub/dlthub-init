@@ -14,3 +14,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `uv sync` runs by default behind an interactive confirmation; a failed sync degrades to a warning so the scaffold still succeeds.
 - `make generate-skills` / `update-skills` / `check-skills` populate the root `skills/` directory from the dltHub AI workbench's `init` toolkit, pinned to a `WORKBENCH_REF` commit (with a CI drift guard), mirroring `dlthub-start`'s AI-generation flow.
 - Scaffolded workspaces receive the bundled skills: copied into `.agents/skills/` (the canonical location most agents read) and linked into `.claude/skills/` via relative symlinks (copied on Windows or when symlinks are unavailable). The skills ship in the wheel from the single-source `skills/` directory.
+- After scaffolding, the next steps point you to open your coding agent in the workspace (the `cd` and `uv sync` steps drop out when not needed).
