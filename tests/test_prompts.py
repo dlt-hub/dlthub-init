@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from dlthub_init import display
+import dlthub_init.display as display
 from dlthub_init.prompts import confirm
 
 

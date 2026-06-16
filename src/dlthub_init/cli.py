@@ -23,6 +23,7 @@ from .errors import CollisionError, UvError, WorkspaceError
 from .project_metadata import CONFIG_PATH, apply_workspace_name
 from .prompts import confirm
 from .scaffold import apply_scaffold, resolve_target
+from .skills import install_skills
 from .uv import execute_uv_install, find_uv, run_uv_sync
 
 
@@ -135,7 +136,10 @@ def run(args: argparse.Namespace) -> None:
     if _written(plan, CONFIG_PATH):
         workspace_name = apply_workspace_name(project_dir, project_dir.name)
         substep_detail(strings.MSG_WORKSPACE_NAME.format(workspace_name=workspace_name))
+    installed_skills = install_skills(project_dir)
     print_summary(plan)
+    if installed_skills:
+        substep_detail(strings.MSG_SKILLS_INSTALLED.format(count=len(installed_skills)))
 
     synced = _maybe_sync(project_dir, args, verbose=verbose)
     print_next_steps(project_dir, synced=synced, uv_installed=find_uv() is not None)
