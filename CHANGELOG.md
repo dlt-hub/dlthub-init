@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-18
+
 ### Changed
 - Refreshed the bundled minimal workspace `uv.lock`, bumping `dlt` to `1.28.0` along with its transitive dependencies.
 
