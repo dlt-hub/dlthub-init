@@ -12,6 +12,13 @@ import generate_skills  # noqa: E402
 import update_skills  # noqa: E402
 
 
+class SkillToolkitsTest(unittest.TestCase):
+    def test_skill_toolkits_is_a_tuple(self):
+        # A bare string iterates per-character in `for toolkit in toolkits`.
+        self.assertIsInstance(generate_skills.SKILL_TOOLKITS, tuple)
+        self.assertTrue(generate_skills.SKILL_TOOLKITS)
+
+
 class SelectedToolkitsTest(unittest.TestCase):
     def test_default_when_env_unset(self):
         with patch.dict("os.environ", {}, clear=True):
