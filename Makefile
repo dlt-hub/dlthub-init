@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist publish ci lock-upgrade lock-check scaffold-lock-upgrade scaffold-lock-check generate-skills update-skills check-skills workspace workspace-init
+.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major publish ci lock-upgrade lock-check scaffold-lock-upgrade scaffold-lock-check generate-skills update-skills check-skills workspace workspace-init
 
 PYTHON_SOURCES := src tests tests_integration scripts
 SCAFFOLD_DIR ?= src/dlthub_init/scaffolds/minimal_workspace
@@ -61,6 +61,33 @@ build: dev ## Build the package wheel
 
 clean-dist: ## Remove dist/ directory
 	-@rm -r dist/
+
+version-upgrade: ## Bump version in pyproject.toml + uv.lock. Prompts when interactive, else pass LEVEL=major|minor|patch (or use version-upgrade-{patch,minor,major})
+	@level="$(LEVEL)"; \
+	if [ -z "$$level" ]; then \
+		if [ -t 0 ]; then \
+			echo "Current version: $$(uv version --short)"; \
+			printf "Bump which part? [major/minor/patch] "; \
+			read level; \
+		else \
+			echo "error: no TTY for the prompt — pass LEVEL=major|minor|patch or run 'make version-upgrade-patch'"; exit 1; \
+		fi; \
+	fi; \
+	case "$$level" in \
+		major|minor|patch) ;; \
+		*) echo "error: expected major, minor, or patch (got '$$level')"; exit 1;; \
+	esac; \
+	uv version --bump "$$level" --no-sync; \
+	echo "version-upgrade: updated pyproject.toml and uv.lock — review 'git diff pyproject.toml uv.lock' and commit."
+
+version-upgrade-patch: ## Bump the patch version non-interactively (AI/CI-friendly)
+	@$(MAKE) version-upgrade LEVEL=patch
+
+version-upgrade-minor: ## Bump the minor version non-interactively (AI/CI-friendly)
+	@$(MAKE) version-upgrade LEVEL=minor
+
+version-upgrade-major: ## Bump the major version non-interactively (AI/CI-friendly)
+	@$(MAKE) version-upgrade LEVEL=major
 
 publish: clean-dist build ## Build and publish dlthub-init to PyPI
 	ls -l dist/

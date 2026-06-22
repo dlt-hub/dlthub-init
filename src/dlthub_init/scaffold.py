@@ -8,6 +8,7 @@ from pathlib import Path
 
 from . import strings
 from .collisions import Flags, Outcome, PlannedPath, build_plan, conflicts
+from .config import DISTRIBUTION_NAME
 from .errors import CollisionError, ScaffoldError
 
 SCAFFOLDS_DIR = Path(__file__).parent / "scaffolds"
@@ -15,7 +16,7 @@ SCAFFOLDS_DIR = Path(__file__).parent / "scaffolds"
 _IGNORE_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"})
 _DLT_RUNTIME_DIRS = frozenset({"data", "state", ".var"})
 
-_MERGE_MARKER = "# Added by dlthub-init"
+_MERGE_MARKER = f"# Added by {DISTRIBUTION_NAME}"
 
 
 def resolve_target(requested_arg: str | None) -> Path:

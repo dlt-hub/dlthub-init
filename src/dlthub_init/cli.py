@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import strings
 from .collisions import Flags
-from .config import DEFAULT_SCAFFOLD
+from .config import DEFAULT_SCAFFOLD, DISTRIBUTION_NAME
 from .display import (
     console,
     err_console,
@@ -41,7 +41,7 @@ def _ensure_utf8_io_on_windows() -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="dlthub-init",
+        prog=DISTRIBUTION_NAME,
         description="Scaffold a dltHub workspace into a new or existing directory.",
     )
     parser.add_argument(
