@@ -21,8 +21,8 @@ SKILLS_DIR = SCRIPT_PATH.parent.parent / "skills"
 
 WORKBENCH_REPO = os.environ.get("DLTHUB_WORKBENCH_REPO", "https://github.com/dlt-hub/dlthub-ai-workbench.git")
 WORKBENCH_BRANCH = "master"
-WORKBENCH_REF_SHORT = "3531314"
-WORKBENCH_REF = "35313143434c7a784fa61e1c0f549b6b9110abb7"
+WORKBENCH_REF_SHORT = "1853f50"
+WORKBENCH_REF = "1853f504a88d018c9d47f62bcbdfa43aa3384a35"
 SKILL_TOOLKITS = ("init",)
 
 _KEEP = ".gitkeep"
