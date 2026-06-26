@@ -20,10 +20,10 @@ SCRIPT_PATH = Path(__file__).resolve()
 SKILLS_DIR = SCRIPT_PATH.parent.parent / "skills"
 
 WORKBENCH_REPO = os.environ.get("DLTHUB_WORKBENCH_REPO", "https://github.com/dlt-hub/dlthub-ai-workbench.git")
-WORKBENCH_BRANCH = "master"
+WORKBENCH_BRANCH = "feat/handover-after-onboarding"
 WORKBENCH_REF_SHORT = "3531314"
 WORKBENCH_REF = "35313143434c7a784fa61e1c0f549b6b9110abb7"
-SKILL_TOOLKITS = ("init",)
+SKILL_TOOLKITS = ("init","one-shot")
 
 _KEEP = ".gitkeep"
 _IGNORE = shutil.ignore_patterns(".DS_Store", "__pycache__")
