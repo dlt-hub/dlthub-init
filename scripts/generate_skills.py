@@ -21,8 +21,8 @@ SKILLS_DIR = SCRIPT_PATH.parent.parent / "skills"
 
 WORKBENCH_REPO = os.environ.get("DLTHUB_WORKBENCH_REPO", "https://github.com/dlt-hub/dlthub-ai-workbench.git")
 WORKBENCH_BRANCH = "feat/handover-after-onboarding"
-WORKBENCH_REF_SHORT = "7cb5bfe"
-WORKBENCH_REF = "7cb5bfe5ce00e62f489ef3cf6c0cac9a7ff33841"
+WORKBENCH_REF_SHORT = "0843adb"
+WORKBENCH_REF = "0843adba238954cc7e2193da1751890abc1f7197"
 SKILL_TOOLKITS = ("init","dlthub-init-skills")
 
 _KEEP = ".gitkeep"
