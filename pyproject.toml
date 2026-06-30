@@ -18,6 +18,8 @@ classifiers = [
 dependencies = [
   "rich>=13.7",
   "beaupy>=3.9",
+  "posthog>=3.7",
+  "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.urls]
@@ -72,6 +74,17 @@ warn_return_any = false
 [[tool.mypy.overrides]]
 module = "beaupy.*"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "posthog.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tomli"
+ignore_missing_imports = true
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dlthub_init"]

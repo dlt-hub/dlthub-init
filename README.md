@@ -30,6 +30,7 @@ install dependencies with `uv`.
 | `--merge` | Append missing entries to an existing `.gitignore` instead of skipping it. |
 | `--no-pyproject` | Skip `pyproject.toml`. |
 | `--no-gitignore` | Skip `.gitignore`. |
+| `--no-telemetry` | Disable usage telemetry for this run. |
 | `--verbose`, `-v` | Stream output from `uv`. |
 
 ## Collision behavior
@@ -45,6 +46,21 @@ install dependencies with `uv`.
 - `uv.lock` is written only when `pyproject.toml` is created, so the lockfile
   always matches the workspace's dependencies.
 - `--force` overwrites the generated files (never secrets).
+
+## Telemetry
+
+`dlthub-init` sends anonymous usage events so we can improve the scaffolding
+experience.
+
+No personal data is collected, and no workspace contents are ever sent.
+
+Telemetry is controlled by the following, in order of precedence:
+
+1. the `--no-telemetry` flag,
+2. `DLTHUB_INIT_TELEMETRY=0` (or `false`/`off`),
+3. `DO_NOT_TRACK=1`,
+4. an existing dlt opt-out (`~/.dlt/config.toml` `[runtime] dlthub_telemetry = false`,
+   or `RUNTIME__DLTHUB_TELEMETRY=false`).
 
 ## Development
 
