@@ -223,6 +223,7 @@ class EventShapeTests(unittest.TestCase):
         self.assertEqual(props["actor_id"], "device-123")
         self.assertEqual(props["object_type"], "uvx_command")
         self.assertEqual(props["object_id"], "dlthub-init")
+        self.assertEqual(props["context"], "uvx-init")
         self.assertEqual(props["source"], "uvx")
         self.assertEqual(props["device_id"], "device-123")
         self.assertEqual(props["cli_version"], telemetry.VERSION)

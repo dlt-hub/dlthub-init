@@ -33,6 +33,7 @@ EVENT_NAME = "visitor:run:uvx_command"
 _ACTOR_TYPE = "visitor"
 _OBJECT_TYPE = "uvx_command"
 _OBJECT_ID = "dlthub-init"
+_CONTEXT = "uvx-init"
 _SOURCE = "uvx"
 
 RunStatus = Literal["success", "failed", "cancelled"]
@@ -212,6 +213,7 @@ def _base_properties(device_id: str) -> dict[str, object]:
         "actor_id": device_id,
         "object_type": _OBJECT_TYPE,
         "object_id": _OBJECT_ID,
+        "context": _CONTEXT,
         "source": _SOURCE,
         "device_id": device_id,
         "session_id": secrets.token_hex(16),
