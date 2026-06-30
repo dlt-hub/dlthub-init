@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Anonymous usage telemetry: `dlthub-init` now emits a telemetry event on a command execution. Opt out with `--no-telemetry`, `DLTHUB_INIT_TELEMETRY=0`, `DO_NOT_TRACK=1`, or an existing dlt opt-out. See the README "Telemetry" section.
+
 ## [0.1.2] - 2026-06-23
 
 ### Changed

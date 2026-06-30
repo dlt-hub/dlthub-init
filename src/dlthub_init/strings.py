@@ -84,3 +84,10 @@ STEPS_LABEL_OPEN_AGENT = (
 CMD_INSTALL_UV_UNIX = "curl -LsSf https://astral.sh/uv/install.sh | sh"
 CMD_UV_SYNC = "uv sync"
 CMD_CD = "cd {project_dir}"
+
+
+# Telemetry -------------------------------------------------------------
+MSG_TELEMETRY_NOTICE = (
+    "[dim]dlthub-init sends anonymous usage events to help us improve user experience. "
+    "Opt out with --no-telemetry, DLTHUB_INIT_TELEMETRY=0, or DO_NOT_TRACK=1.[/dim]"
+)

@@ -10,3 +10,5 @@ build/
 
 # Example workspaces created for testing
 examples/
+
+src/dlthub_init/_telemetry_key.py

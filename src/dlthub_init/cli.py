@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import strings
+from . import strings, telemetry
 from .collisions import Flags
 from .config import DEFAULT_SCAFFOLD, DISTRIBUTION_NAME
 from .display import (
@@ -87,35 +87,48 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip .gitignore.",
     )
+    parser.add_argument(
+        "--no-telemetry",
+        action="store_true",
+        help="Disable usage telemetry for this run.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     _ensure_utf8_io_on_windows()
     args = build_parser().parse_args(argv)
+    telemetry.init(no_telemetry=args.no_telemetry)
 
     try:
         run(args)
     except KeyboardInterrupt:
+        telemetry.track_run("cancelled")
         console.print(strings.MSG_CANCELLED)
         return 130
     except CollisionError as exc:
+        telemetry.track_run("failed", error_code=type(exc).__name__)
         print_collision(exc.conflicts)
         return 2
     except WorkspaceError as exc:
+        telemetry.track_run("failed", error_code=type(exc).__name__)
         console.print(strings.MSG_ERROR_PREFIX.format(message=exc))
         return 1
     except Exception as exc:
+        telemetry.track_run("failed", error_code=type(exc).__name__)
         console.print(strings.MSG_UNEXPECTED_ERROR.format(message=exc))
         if args.verbose:
             console.print_exception()
         else:
             console.print(strings.MSG_UNEXPECTED_ERROR_HINT)
         return 1
+    telemetry.track_run("success")
     return 0
 
 
 def run(args: argparse.Namespace) -> None:
+    telemetry.show_first_run_notice()
+
     if args.yes:
         err_console.print(strings.MSG_TESTING_SHORTCUT_NOTE)
 
