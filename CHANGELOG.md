@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Anonymous usage telemetry: `dlthub-init` now emits a telemetry event on a command execution. Opt out with `--no-telemetry`, `DLTHUB_INIT_TELEMETRY=0`, `DO_NOT_TRACK=1`, or an existing dlt opt-out. See the README "Telemetry" section.
+- Scaffold a `__deployment__.py` deployment manifest into the minimal workspace — an empty stub (with guidance) where you import the pipelines and notebooks to deploy and list them in `__all__`.
 
 ### Changed
 - Refreshed the root and bundled minimal workspace `uv.lock` files to the latest within-constraint dependency versions (notably `dlthub-client` `0.27.9` → `0.28.0`; dev tooling `pytest` `9.1.0` → `9.1.1` and `ruff` `0.15.17` → `0.15.20`).
