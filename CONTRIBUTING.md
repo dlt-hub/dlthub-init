@@ -88,6 +88,10 @@ DLTHUB_INIT_POSTHOG_HOST=https://eu.i.posthog.com \
   uv run dlthub-init my-workspace --yes
 ```
 
+For releases, put the real key in a gitignored `.make.env`
+(`DLTHUB_INIT_POSTHOG_KEY=phc_…`); the Makefile loads it into `uv build`, and
+`make publish` refuses to run without it.
+
 ## Code style
 
 Write self-explanatory code. Do not add comments that narrate what the code
