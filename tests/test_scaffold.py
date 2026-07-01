@@ -11,6 +11,7 @@ EXPECTED = {
     Path("pyproject.toml"),
     Path(".gitignore"),
     Path("uv.lock"),
+    Path(".python-version"),
     Path("__deployment__.py"),
     Path(".dlt/.workspace"),
     Path(".dlt/config.toml"),
