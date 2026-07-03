@@ -21,6 +21,7 @@ from .display import (
 )
 from .errors import CollisionError, UvError, WorkspaceError
 from .prompts import confirm
+from .hooks import install_hooks
 from .scaffold import apply_scaffold, resolve_target
 from .skills import install_skills
 from .uv import execute_uv_install, find_uv, run_uv_sync
@@ -146,9 +147,12 @@ def run(args: argparse.Namespace) -> None:
 
     plan = apply_scaffold(project_dir, scaffold=scaffold, flags=flags)
     installed_skills = install_skills(project_dir)
+    configured_hooks = install_hooks(project_dir)
     print_summary(plan)
     if installed_skills:
         substep_detail(strings.MSG_SKILLS_INSTALLED.format(count=len(installed_skills)))
+    if configured_hooks:
+        substep_detail(strings.MSG_HOOKS_INSTALLED.format(agents=", ".join(configured_hooks)))
 
     synced = _maybe_sync(project_dir, args, verbose=verbose)
     print_next_steps(project_dir, synced=synced, uv_installed=find_uv() is not None)
