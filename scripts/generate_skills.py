@@ -18,6 +18,7 @@ from pathlib import Path
 
 SCRIPT_PATH = Path(__file__).resolve()
 SKILLS_DIR = SCRIPT_PATH.parent.parent / "skills"
+HOOKS_DIR = SCRIPT_PATH.parent.parent / "hooks"
 
 WORKBENCH_REPO = os.environ.get("DLTHUB_WORKBENCH_REPO", "https://github.com/dlt-hub/dlthub-ai-workbench.git")
 WORKBENCH_BRANCH = "master"
@@ -59,6 +60,23 @@ def _reset_skills_dir() -> None:
         shutil.rmtree(entry) if entry.is_dir() else entry.unlink()
 
 
+def _copy_hooks(workbench: Path) -> int:
+    """Sync workbench/init/hooks/*.py into hooks/. Tolerates refs that predate
+    the hooks directory (keeps whatever is committed and warns instead)."""
+    source = workbench / "workbench" / "init" / "hooks"
+    scripts = sorted(source.glob("*.py")) if source.is_dir() else []
+    if not scripts:
+        print("warning: workbench ref has no init hook scripts; keeping committed hooks/")
+        return 0
+    HOOKS_DIR.mkdir(exist_ok=True)
+    for entry in HOOKS_DIR.iterdir():
+        if entry.name != _KEEP:
+            shutil.rmtree(entry) if entry.is_dir() else entry.unlink()
+    for script in scripts:
+        shutil.copy2(script, HOOKS_DIR / script.name)
+    return len(scripts)
+
+
 def _copy_toolkit_skills(workbench: Path, toolkits: tuple[str, ...]) -> dict[str, str]:
     collected: dict[str, str] = {}
     for toolkit in toolkits:
@@ -90,7 +108,10 @@ def main() -> int:
             _git(workbench, "checkout", "--quiet", full)
         _reset_skills_dir()
         collected = _copy_toolkit_skills(workbench, toolkits)
+        hook_count = _copy_hooks(workbench)
     print(f"Wrote {len(collected)} skill(s) from [{', '.join(toolkits)}]: {', '.join(sorted(collected))}")
+    if hook_count:
+        print(f"Wrote {hook_count} hook script(s) from init")
     return 0
 
 
