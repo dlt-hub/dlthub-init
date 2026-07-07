@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-07
+
 ### Changed
 - Refreshed the bundled skills to workbench `e8bcc26`: the `dlthub-router` skill now only runs the `dlthub ai status` verification when the install result is ambiguous or MCP hasn't been checked this session, instead of every time.
+- Refreshed the bundled minimal workspace `uv.lock` to the latest within-constraint dependency versions (notably `dlthub-client` `0.28.0` → `0.28.1`; plus transitive bumps to `fastmcp`, `marimo`, `narwhals`, `uvicorn`, `typing-extensions`, and others).
 
 ## [0.2.1] - 2026-07-01
 
