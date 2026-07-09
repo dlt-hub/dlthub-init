@@ -8,7 +8,7 @@ from dlthub_init.prompts import confirm
 class ConfirmTest(unittest.TestCase):
     def setUp(self):
         display.console.quiet = True
-        interactive = patch("dlthub_init.prompts._stdin_is_interactive", return_value=True)
+        interactive = patch("dlthub_init.prompts.stdin_is_interactive", return_value=True)
         interactive.start()
         self.addCleanup(interactive.stop)
 
@@ -32,7 +32,7 @@ class ConfirmTest(unittest.TestCase):
 class NonInteractiveConfirmTest(unittest.TestCase):
     def setUp(self):
         display.console.quiet = True
-        non_interactive = patch("dlthub_init.prompts._stdin_is_interactive", return_value=False)
+        non_interactive = patch("dlthub_init.prompts.stdin_is_interactive", return_value=False)
         non_interactive.start()
         self.addCleanup(non_interactive.stop)
 

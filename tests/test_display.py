@@ -40,8 +40,16 @@ class PrintSummaryTest(unittest.TestCase):
 
 
 class NextStepsTest(unittest.TestCase):
-    def _render(self, project_dir, *, synced, uv_installed=True):
-        return _capture(lambda: display.print_next_steps(project_dir, synced=synced, uv_installed=uv_installed))
+    def _render(self, project_dir, *, synced, uv_installed=True, interactive=True, skills_available=False):
+        return _capture(
+            lambda: display.print_next_steps(
+                project_dir,
+                synced=synced,
+                uv_installed=uv_installed,
+                interactive=interactive,
+                skills_available=skills_available,
+            )
+        )
 
     def test_single_step_in_place_synced(self):
         out = self._render(Path.cwd(), synced=True)
@@ -56,6 +64,20 @@ class NextStepsTest(unittest.TestCase):
         self.assertIn("1.", out)
         self.assertIn("2.", out)
         self.assertIn("uv sync", out)
+
+    def test_interactive_points_at_coding_agent(self):
+        out = self._render(Path.cwd(), synced=True, interactive=True, skills_available=True)
+        self.assertIn("Open your coding agent", out)
+        self.assertNotIn(".agents/skills", out)
+
+    def test_non_interactive_points_at_skills(self):
+        out = self._render(Path.cwd(), synced=True, interactive=False, skills_available=True)
+        self.assertIn(".agents/skills", out)
+        self.assertNotIn("Open your coding agent", out)
+
+    def test_non_interactive_without_skills_falls_back(self):
+        out = self._render(Path.cwd(), synced=True, interactive=False, skills_available=False)
+        self.assertIn("Open your coding agent", out)
 
 
 class DisplayPathTest(unittest.TestCase):

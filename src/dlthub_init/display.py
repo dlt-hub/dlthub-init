@@ -69,7 +69,14 @@ def print_summary(plan: list[PlannedPath]) -> None:
         console.print(strings.MSG_NOTHING_WRITTEN)
 
 
-def print_next_steps(project_dir: Path, *, synced: bool, uv_installed: bool) -> None:
+def print_next_steps(
+    project_dir: Path,
+    *,
+    synced: bool,
+    uv_installed: bool,
+    interactive: bool = True,
+    skills_available: bool = False,
+) -> None:
     steps: list[tuple[str, str | None]] = []
     cd = _display_path(project_dir)
     if cd != ".":
@@ -78,7 +85,10 @@ def print_next_steps(project_dir: Path, *, synced: bool, uv_installed: bool) -> 
         if not uv_installed:
             steps.append((strings.STEPS_LABEL_INSTALL_UV, strings.CMD_INSTALL_UV_UNIX))
         steps.append((strings.STEPS_LABEL_INSTALL_DEPS, strings.CMD_UV_SYNC))
-    steps.append((strings.STEPS_LABEL_OPEN_AGENT, None))
+    if not interactive and skills_available:
+        steps.append((strings.STEPS_LABEL_USE_SKILLS, None))
+    else:
+        steps.append((strings.STEPS_LABEL_OPEN_AGENT, None))
 
     single = len(steps) == 1
     header = strings.LABEL_NEXT_STEP if single else strings.LABEL_NEXT_STEPS

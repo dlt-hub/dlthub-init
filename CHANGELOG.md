@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Non-interactive runs (piped stdin, CI, coding agents) no longer crash at the venv prompt. Without a TTY, `dlthub-init` used to fail with `Unexpected error: (25, 'Inappropriate ioctl for device')` and create no venv; it now proceeds with the prompt defaults and installs the venv unattended.
+
+### Changed
+- In non-interactive runs the final "Next steps" line now points at the bundled skills in `.agents/skills/` instead of telling you to open a coding agent.
+
 ## [0.2.2] - 2026-07-07
 
 ### Changed

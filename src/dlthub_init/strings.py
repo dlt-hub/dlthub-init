@@ -80,6 +80,10 @@ STEPS_LABEL_INSTALL_DEPS = "Install dependencies:"
 STEPS_LABEL_OPEN_AGENT = (
     "Open your coding agent (Claude Code, Cursor, Codex, …) in this workspace and tell it what to build."
 )
+STEPS_LABEL_USE_SKILLS = (
+    "This workspace ships dltHub skills in [bold].agents/skills/[/bold] — "
+    "use them to guide building your dltHub workspace."
+)
 
 CMD_INSTALL_UV_UNIX = "curl -LsSf https://astral.sh/uv/install.sh | sh"
 CMD_UV_SYNC = "uv sync"
