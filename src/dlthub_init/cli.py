@@ -20,9 +20,9 @@ from .display import (
     substep_detail,
 )
 from .errors import CollisionError, UvError, WorkspaceError
-from .prompts import confirm
+from .prompts import confirm, stdin_is_interactive
 from .scaffold import apply_scaffold, resolve_target
-from .skills import install_skills
+from .skills import install_skills, skills_source
 from .uv import execute_uv_install, find_uv, run_uv_sync
 
 
@@ -151,7 +151,13 @@ def run(args: argparse.Namespace) -> None:
         substep_detail(strings.MSG_SKILLS_INSTALLED.format(count=len(installed_skills)))
 
     synced = _maybe_sync(project_dir, args, verbose=verbose)
-    print_next_steps(project_dir, synced=synced, uv_installed=find_uv() is not None)
+    print_next_steps(
+        project_dir,
+        synced=synced,
+        uv_installed=find_uv() is not None,
+        interactive=stdin_is_interactive(),
+        skills_available=skills_source() is not None,
+    )
 
 
 def _maybe_sync(project_dir: Path, args: argparse.Namespace, *, verbose: bool) -> bool:
