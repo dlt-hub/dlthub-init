@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-09
+
 ### Fixed
 - Non-interactive runs (piped stdin, CI, coding agents) no longer crash at the venv prompt. Without a TTY, `dlthub-init` used to fail with `Unexpected error: (25, 'Inappropriate ioctl for device')` and create no venv; it now proceeds with the prompt defaults and installs the venv unattended.
 
