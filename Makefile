@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major require-posthog-key publish ci lock-upgrade lock-check scaffold-lock-upgrade scaffold-lock-check generate-skills update-skills check-skills workspace workspace-init workspace-env workspace-local
+.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major require-posthog-key publish ci lock-upgrade lock-check scaffold-lock-upgrade scaffold-lock-check generate-skills update-skills check-skills workspace workspace-init workspace-env workspace-local workspace-dev
 
 PYTHON_SOURCES := src tests tests_integration scripts
 SCAFFOLD_DIR ?= src/dlthub_init/scaffolds/minimal_workspace
@@ -67,11 +67,11 @@ API_BASE_URL ?=
 AUTH_BASE_URL ?=
 DLT_RUNTIME_INSECURE ?=
 
-workspace-env: workspace ## Scaffold ./$(WORKSPACE_DIR) then pin API_BASE_URL/AUTH_BASE_URL into .dlt/config.toml
-	@if [ -z "$(API_BASE_URL)" ] || [ -z "$(AUTH_BASE_URL)" ]; then \
-		echo "workspace-env: set API_BASE_URL and AUTH_BASE_URL (or use 'make workspace-local')"; exit 1; \
+workspace-env: workspace ## Scaffold ./$(WORKSPACE_DIR) then pin API_BASE_URL (+ AUTH_BASE_URL if set) into .dlt/config.toml
+	@if [ -z "$(API_BASE_URL)" ]; then \
+		echo "workspace-env: set API_BASE_URL (or use 'make workspace-local' / 'make workspace-dev')"; exit 1; \
 	fi
-	uv run python scripts/pin_workspace_urls.py "$(WORKSPACE_DIR)/.dlt/config.toml" "$(API_BASE_URL)" "$(AUTH_BASE_URL)"
+	uv run python scripts/pin_workspace_urls.py "$(WORKSPACE_DIR)/.dlt/config.toml" "$(API_BASE_URL)" $(if $(AUTH_BASE_URL),"$(AUTH_BASE_URL)")
 	@if [ -n "$(DLT_RUNTIME_INSECURE)" ]; then \
 		echo "workspace-env: local stack uses mkcert certs — before 'dlthub workspace connect', run:"; \
 		echo "    export DLT_RUNTIME_INSECURE=$(DLT_RUNTIME_INSECURE)"; \
@@ -82,6 +82,9 @@ workspace-local: ## Scaffold ./$(WORKSPACE_DIR) pointed at the local stack (api/
 		API_BASE_URL=https://api.dlthub.test \
 		AUTH_BASE_URL=https://auth.dlthub.test \
 		DLT_RUNTIME_INSECURE=true
+
+workspace-dev: ## Scaffold ./$(WORKSPACE_DIR) pointed at the dev stack (api.dlthub.dev; auth shares the api host)
+	@$(MAKE) workspace-env API_BASE_URL=https://api.dlthub.dev
 
 build: dev ## Build the package wheel
 	uv build

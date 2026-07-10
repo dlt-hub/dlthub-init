@@ -32,24 +32,27 @@ def _upsert(text: str, key: str, value: str) -> str:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 4:
+    if len(argv) not in (3, 4):
         print(
-            "usage: pin_workspace_urls.py <config.toml> <api_base_url> <auth_base_url>",
+            "usage: pin_workspace_urls.py <config.toml> <api_base_url> [auth_base_url]",
             file=sys.stderr,
         )
         return 2
 
-    config_path, api_base_url, auth_base_url = Path(argv[1]), argv[2], argv[3]
+    config_path, api_base_url = Path(argv[1]), argv[2]
+    auth_base_url = argv[3] if len(argv) == 4 else None
     if not config_path.is_file():
         print(f"pin_workspace_urls: {config_path} not found", file=sys.stderr)
         return 1
 
     text = config_path.read_text(encoding="utf-8")
     text = _upsert(text, "api_base_url", api_base_url)
-    text = _upsert(text, "auth_base_url", auth_base_url)
+    if auth_base_url:
+        text = _upsert(text, "auth_base_url", auth_base_url)
     config_path.write_text(text, encoding="utf-8")
 
-    print(f"pin_workspace_urls: pinned api_base_url/auth_base_url into {config_path}")
+    pinned = "api_base_url/auth_base_url" if auth_base_url else "api_base_url"
+    print(f"pin_workspace_urls: pinned {pinned} into {config_path}")
     return 0
 
 
