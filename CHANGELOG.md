@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Refreshed the root and bundled minimal workspace `uv.lock` files to the latest within-constraint dependency versions (dev tooling `mypy` `2.1.0` → `2.2.0`, `ruff` `0.15.20` → `0.15.21`, plus transitive bumps to `posthog`, `charset-normalizer`, `typing-extensions`, and others).
+
 ## [0.2.3] - 2026-07-09
 
 ### Fixed
