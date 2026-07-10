@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-07-10
+
 ### Changed
 - Refreshed the bundled minimal workspace `uv.lock` to the latest within-constraint dependency versions (notably `dlt` `1.28.1` → `1.28.2`; plus transitive bumps to `fastmcp`, `cyclopts`, `uvicorn`, `croniter`, `tzdata`, and others).
 
