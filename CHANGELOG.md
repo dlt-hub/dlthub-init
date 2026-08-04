@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Refreshed the bundled minimal workspace `uv.lock` to the latest within-constraint versions (notably `dlt` 1.29.0 → 1.29.1, `duckdb` 1.5.4 → 1.5.5, `sqlglot` 30.13 → 30.14, `cryptography` 49.0 → 50.0, `marimo` 0.23.14 → 0.23.16), plus transitive updates.
+
 ## [0.2.5] - 2026-07-22
 
 ### Changed
