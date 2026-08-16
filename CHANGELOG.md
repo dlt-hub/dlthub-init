@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-08-17
+
 ### Changed
 - Refreshed the bundled minimal workspace `uv.lock` to the latest within-constraint versions (notably `dlt` 1.29.1 → 1.30.0, `dlthub` 0.29.0 → 0.30.0, `starlette` 1.3.1 → 1.6.0, `sqlglot` 30.14 → 30.17, `setuptools` 83.0 → 84.0), plus transitive updates.
 
