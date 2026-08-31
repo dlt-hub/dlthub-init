@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Refreshed the bundled minimal workspace `uv.lock` to the latest within-constraint versions (notably `marimo` 0.23.16 → 0.24.0, `dlthub-client` 0.28.2 → 0.28.3, `authlib` 1.7.2 → 1.8.0, `cyclopts` 4.22.5 → 4.23.3, `cryptography` 50.0.0 → 50.0.1, `pydantic` 2.13.4 → 2.13.5), plus transitive updates. `dlt` and `dlthub` are unchanged.
+- Refreshed the root `uv.lock` (`posthog` 7.39.1 → 7.45.1, `pygments` 2.20.0 → 2.21.0, `idna` 3.18 → 3.19).
+
 ## [0.2.7] - 2026-08-17
 
 ### Changed
