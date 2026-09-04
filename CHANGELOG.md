@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Synced the bundled minimal workspace dependencies with dlt's `WORKSPACE_DEPS`: added `s3fs` (plus `aiobotocore`, `aiohttp`, `botocore` and transitives) and dropped the redundant `python_version >= '3.10'` markers on `ibis-framework` and `fastmcp`. Refreshed the scaffold `uv.lock` accordingly.
+
+## [0.2.8] - 2026-08-31
+
+### Changed
+- Refreshed the bundled minimal workspace `uv.lock` to the latest within-constraint versions (notably `marimo` 0.23.16 → 0.24.0, `dlthub-client` 0.28.2 → 0.28.3, `authlib` 1.7.2 → 1.8.0, `cyclopts` 4.22.5 → 4.23.3, `cryptography` 50.0.0 → 50.0.1, `pydantic` 2.13.4 → 2.13.5), plus transitive updates. `dlt` and `dlthub` are unchanged.
+- Refreshed the root `uv.lock` (`posthog` 7.39.1 → 7.45.1, `pygments` 2.20.0 → 2.21.0, `idna` 3.18 → 3.19).
+
+## [0.2.7] - 2026-08-17
+
+### Changed
+- Refreshed the bundled minimal workspace `uv.lock` to the latest within-constraint versions (notably `dlt` 1.29.1 → 1.30.0, `dlthub` 0.29.0 → 0.30.0, `starlette` 1.3.1 → 1.6.0, `sqlglot` 30.14 → 30.17, `setuptools` 83.0 → 84.0), plus transitive updates.
+
+## [0.2.6] - 2026-08-04
+
+### Changed
+- Refreshed the bundled minimal workspace `uv.lock` to the latest within-constraint versions (notably `dlt` 1.29.0 → 1.29.1, `duckdb` 1.5.4 → 1.5.5, `sqlglot` 30.13 → 30.14, `cryptography` 49.0 → 50.0, `marimo` 0.23.14 → 0.23.16), plus transitive updates.
+
 ## [0.2.5] - 2026-07-22
 
 ### Changed
