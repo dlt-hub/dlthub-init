@@ -20,6 +20,7 @@ class EndToEndWorkspaceTest(unittest.TestCase):
         self.assertTrue((self.project_dir / "pyproject.toml").exists())
         self.assertTrue((self.project_dir / ".venv" / "pyvenv.cfg").exists())
         self.assertTrue((self.project_dir / ".agents" / "skills").is_dir())
+        self.assertTrue((self.project_dir / ".mcp.json").exists())
 
 
 if __name__ == "__main__":
