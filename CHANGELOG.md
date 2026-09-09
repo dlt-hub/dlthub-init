@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The bundled minimal workspace now ships a `.mcp.json` registering the dlt workspace MCP server.
+
 ### Changed
 - Synced the bundled minimal workspace dependencies with dlt's `WORKSPACE_DEPS`: added `s3fs` (plus `aiobotocore`, `aiohttp`, `botocore` and transitives) and dropped the redundant `python_version >= '3.10'` markers on `ibis-framework` and `fastmcp`. Refreshed the scaffold `uv.lock` accordingly.
 
