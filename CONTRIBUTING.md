@@ -106,6 +106,66 @@ For releases, put the real key in a gitignored `.make.env`
 (`DLTHUB_INIT_POSTHOG_KEY=phc_…`); the Makefile loads it into `uv build`, and
 `make publish` refuses to run without it.
 
+## Testing against a local platform stack
+
+`make workspace-local` scaffolds `./$(WORKSPACE_DIR)` with `api.dlthub.test` and
+`auth.dlthub.test` pinned into its `.dlt/config.toml`. `dlthub-init` never talks
+to a stack itself, so everything below happens afterwards, against the workspace
+that target produces. Workspaces under `examples/` are gitignored and disposable.
+
+`make workspace-dev` pins `api.dlthub.dev` instead. The connect, deploy and
+scheduling steps below apply there too, but the TLS and login workarounds are
+local-only: the dev stack serves real certificates and shares the auth host with
+the API, which is why the target sets neither `DLT_RUNTIME_INSECURE` nor
+`AUTH_BASE_URL`. It has not been exercised here.
+
+The local stack serves mkcert certificates that Python does not trust, so every
+remote `dlthub` command fails with `CERTIFICATE_VERIFY_FAILED` until one of
+these is set:
+
+| Variable | Effect |
+|---|---|
+| `DLT_RUNTIME_INSECURE` | Skip TLS verification (`1`/`true`/`yes`). This is what `make workspace-local` prints. Covers auth, API, dataplane, uploads and log streaming; every other client stays verified by default. |
+| `SSL_CERT_FILE` | Trust the local CA instead: `$(mkcert -CAROOT)/rootCA.pem`. Keeps verification on. |
+
+Log in with the device flow. The default browser loopback flow fails against the
+local mock identity service with `invalid_grant`.
+
+```bash
+uv run dlthub login --device          # prints a verification URL and a resume code
+uv run dlthub login --resume <code>   # after approving in the browser
+```
+
+Then connect and deploy. Non-interactive runs need explicit ids, and `connect`
+rebinds the directory, writing `workspace_id` and `organization_id` under
+`[runtime]` plus the name under `[workspace.settings]`.
+
+```bash
+uv run dlthub workspace list
+uv run dlthub workspace connect --create <name> --org-id <org-uuid>
+uv run dlthub deploy --dry-run        # preview; --show-manifest dumps the YAML
+uv run dlthub deploy
+```
+
+Jobs come from `__deployment__.py`. Schedule them with cron triggers:
+
+```python
+from dlt.hub import run
+from dlt.hub.run import trigger
+
+@run.pipeline("hourly_metrics", trigger=trigger.schedule("0 * * * *"))
+def load_hourly_metrics():
+    ...
+```
+
+Two things that cost time:
+
+- `deploy` registers jobs and their schedules but never runs them. Force a run
+  with `uv run dlthub run <job>`.
+- `destination="warehouse"`, which the bundled skills recommend, is not defined
+  in the scaffold. Use `destination="duckdb"`, or add the named destination to
+  `.dlt/config.toml`.
+
 ## Code style
 
 Write self-explanatory code. Do not add comments that narrate what the code
