@@ -286,7 +286,7 @@ wheels = [
 
 [[package]]
 name = "dlthub-init"
-version = "0.2.9"
+version = "0.2.10"
 source = { editable = "." }
 dependencies = [
     { name = "beaupy" },
