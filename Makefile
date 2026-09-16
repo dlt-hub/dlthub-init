@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major require-posthog-key publish ci lock-upgrade lock-check scaffold-lock-upgrade scaffold-lock-check scaffold-deps-sync scaffold-deps-check generate-skills update-skills check-skills workspace workspace-init workspace-env workspace-local workspace-dev
+.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major require-posthog-key publish ci lock-upgrade lock-check scaffold-lock-upgrade scaffold-lock-check scaffold-deps-sync scaffold-deps-check generate-skills update-skills check-skills workspace workspace-init workspace-env workspace-local workspace-dev workspace-agent
 
 PYTHON_SOURCES := src tests tests_integration scripts
 SCAFFOLD_DIR ?= src/dlthub_init/scaffolds/minimal_workspace
@@ -85,6 +85,51 @@ workspace-local: ## Scaffold ./$(WORKSPACE_DIR) pointed at the local stack (api/
 
 workspace-dev: ## Scaffold ./$(WORKSPACE_DIR) pointed at the dev stack (api.dlthub.dev; auth shares the api host)
 	@$(MAKE) workspace-env API_BASE_URL=https://api.dlthub.dev
+
+# Background agent jobs (dlt-hub/dlt#4417). Dev-only: the scaffold pins dlt to a branch
+# archive, so it deliberately lives outside src/ and never ships in the wheel.
+AGENT_WORKSPACE_DIR ?= examples/agent-workspace
+AGENT_WORKSPACE_SRC := dev/agent_workspace
+AGENT_TOOLKIT ?= dlthub-platform
+# Model endpoint, empty by default so nothing org-specific lives in this repo.
+# Pass them to pin an endpoint into the workspace's .dlt/config.toml, e.g.
+#   make workspace-agent AGENT_MODEL=azure:<deployment> \
+#     AGENT_API_URL=https://<resource>.cognitiveservices.azure.com/ \
+#     AGENT_API_VERSION=2024-12-01-preview
+# Unset, a run takes the agent's own default (sonnet, Anthropic) and needs only
+# AGENT__API_KEY. All four fields move together: name a non-Anthropic model or the
+# key goes to Anthropic.
+AGENT_MODEL ?=
+AGENT_API_URL ?=
+AGENT_API_VERSION ?=
+
+workspace-agent: ## Scaffold ./$(AGENT_WORKSPACE_DIR) with background agent jobs, pointed at the dev stack
+	@$(MAKE) workspace WORKSPACE_DIR="$(AGENT_WORKSPACE_DIR)" ARGS="--no-sync"
+	cp -R "$(AGENT_WORKSPACE_SRC)/." "$(AGENT_WORKSPACE_DIR)/"
+	@# The scaffold lock pins the released dlt, which has no agent launcher.
+	rm -f "$(AGENT_WORKSPACE_DIR)/uv.lock"
+	uv run python scripts/pin_workspace_urls.py "$(AGENT_WORKSPACE_DIR)/.dlt/config.toml" https://api.dlthub.dev
+	@# Only when an endpoint was passed; each key only when it has a value.
+	@if [ -n "$(AGENT_MODEL)$(AGENT_API_URL)$(AGENT_API_VERSION)" ]; then \
+		{ printf '\n[agent]\n'; \
+		  [ -n "$(AGENT_MODEL)" ] && printf 'model = "%s"\n' "$(AGENT_MODEL)"; \
+		  [ -n "$(AGENT_API_URL)" ] && printf 'api_url = "%s"\n' "$(AGENT_API_URL)"; \
+		  [ -n "$(AGENT_API_VERSION)" ] && printf 'api_version = "%s"\n' "$(AGENT_API_VERSION)"; \
+		} >> "$(AGENT_WORKSPACE_DIR)/.dlt/config.toml"; \
+		echo "workspace-agent: pinned [agent] endpoint into .dlt/config.toml"; \
+	fi
+	cd "$(AGENT_WORKSPACE_DIR)" && uv sync --quiet && uv run dlthub ai toolkit install $(AGENT_TOOLKIT)
+	@# Workaround: the installer skips a toolkit's agents. See the script docstring.
+	uv run python scripts/place_toolkit_agents.py "$(AGENT_WORKSPACE_DIR)" $(AGENT_TOOLKIT)
+	@echo ""
+	@echo "workspace-agent: ready. Next:"
+	@echo "    cd $(AGENT_WORKSPACE_DIR)"
+	@echo "    export AGENT__API_KEY=<azure-key>     # the only value you supply"
+	@echo "    uv run dlthub local run loop_probe    # smoke test"
+	@echo "    uv run dlthub login && uv run dlthub workspace connect"
+	@echo "    uv run dlthub deploy"
+	@echo "    uv run dlthub run jobs.agent_demo.broken_ingest --follow"
+	@echo "See $(AGENT_WORKSPACE_SRC)/README.md for the two tracks."
 
 build: dev ## Build the package wheel
 	uv build
