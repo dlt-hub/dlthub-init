@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major require-posthog-key publish ci lock-upgrade lock-check scaffold-lock-upgrade scaffold-lock-check generate-skills update-skills check-skills workspace workspace-init workspace-env workspace-local workspace-dev
+.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major require-posthog-key publish ci lock-upgrade lock-check scaffold-lock-upgrade scaffold-lock-check scaffold-deps-sync scaffold-deps-check generate-skills update-skills check-skills workspace workspace-init workspace-env workspace-local workspace-dev
 
 PYTHON_SOURCES := src tests tests_integration scripts
 SCAFFOLD_DIR ?= src/dlthub_init/scaffolds/minimal_workspace
@@ -160,6 +160,12 @@ scaffold-lock-check: ## CI guard: fail if the bundled workspace uv.lock is out o
 		exit 1; \
 	fi
 
+scaffold-deps-sync: ## Sync the bundled workspace deps with dlt's WORKSPACE_DEPS; review the diff, re-run scaffold-lock-upgrade, and commit
+	uv run python scripts/sync_workspace_deps.py
+
+scaffold-deps-check: ## CI guard: fail if the bundled workspace deps drift from dlt's WORKSPACE_DEPS
+	uv run python scripts/sync_workspace_deps.py --check
+
 #
 # Skills (pulled from the dltHub AI workbench)
 #
@@ -188,4 +194,4 @@ check-skills: ## CI guard: fail if skills/ differs from the generated output
 		exit 1; \
 	fi
 
-ci: lint-ci test test-integration lock-check scaffold-lock-check check-skills build ## Run all CI checks locally
+ci: lint-ci test test-integration lock-check scaffold-lock-check scaffold-deps-check check-skills build ## Run all CI checks locally

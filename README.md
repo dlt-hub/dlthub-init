@@ -3,8 +3,8 @@
 Scaffold a [dltHub](https://dlthub.com) workspace into a new or existing directory.
 
 `dlthub-init` lays down the files of a minimal dltHub workspace — `pyproject.toml`,
-a locked `uv.lock`, and the `.dlt/` configuration — and optionally creates the
-virtual environment. That is all it does: it does not log in, run a pipeline, or
+a locked `uv.lock`, the `.dlt/` configuration, and a `.mcp.json` registering the
+dlt workspace MCP server — and optionally creates the virtual environment. That is all it does: it does not log in, run a pipeline, or
 install agent toolkits.
 
 Unlike `dlthub-start`, it is safe to run inside an existing repository. It is
@@ -41,8 +41,8 @@ install dependencies with `uv`.
 - The run stops only if `.dlt/.workspace` already exists — the directory is
   already a dltHub workspace (override with `--force`).
 - Otherwise existing files are **left alone** and reported as skipped: your
-  `pyproject.toml`, `.dlt/config.toml`, and `.dlt/secrets.toml` are never
-  overwritten, and `.gitignore` is skipped (or **merged** with `--merge`).
+  `pyproject.toml`, `.dlt/config.toml`, `.dlt/secrets.toml`, and `.mcp.json` are
+  never overwritten, and `.gitignore` is skipped (or **merged** with `--merge`).
 - `uv.lock` is written only when `pyproject.toml` is created, so the lockfile
   always matches the workspace's dependencies.
 - `--force` overwrites the generated files (never secrets).

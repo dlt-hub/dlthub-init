@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ EXPECTED = {
     Path(".gitignore"),
     Path("uv.lock"),
     Path(".python-version"),
+    Path(".mcp.json"),
     Path("__deployment__.py"),
     Path(".dlt/.workspace"),
     Path(".dlt/config.toml"),
@@ -51,6 +53,13 @@ class ApplyScaffoldTest(unittest.TestCase):
         apply_scaffold(self.project_dir, scaffold=SCAFFOLD, flags=Flags())
         for relative in EXPECTED:
             self.assertTrue((self.project_dir / relative).exists(), relative)
+
+    def test_mcp_json_registers_workspace_server(self):
+        apply_scaffold(self.project_dir, scaffold=SCAFFOLD, flags=Flags())
+        config = json.loads((self.project_dir / ".mcp.json").read_text(encoding="utf-8"))
+        server = config["mcpServers"]["dlt-workspace-mcp"]
+        self.assertEqual(server["command"], "uv")
+        self.assertEqual(server["args"], ["run", "dlthub", "ai", "mcp", "--stdio"])
 
     def test_pyproject_name_is_static(self):
         apply_scaffold(self.project_dir, scaffold=SCAFFOLD, flags=Flags())
