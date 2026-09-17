@@ -128,7 +128,7 @@ workspace-agent: ## Scaffold ./$(AGENT_WORKSPACE_DIR) with background agent jobs
 	@echo "    uv run dlthub local run loop_probe    # smoke test"
 	@echo "    uv run dlthub login && uv run dlthub workspace connect"
 	@echo "    uv run dlthub deploy"
-	@echo "    uv run dlthub run jobs.agent_demo.broken_ingest --follow"
+	@echo "    uv run dlthub job trigger tag:jaffle    # 5 pipelines: 1 correct, 4 broken"
 	@echo "See $(AGENT_WORKSPACE_SRC)/README.md for the two tracks."
 
 build: dev ## Build the package wheel

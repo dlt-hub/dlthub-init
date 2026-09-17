@@ -24,26 +24,38 @@ Then connect and deploy:
 uv run dlthub login
 uv run dlthub workspace connect
 uv run dlthub deploy
-uv run dlthub run jobs.agent_demo.broken_ingest --follow
+uv run dlthub job trigger tag:jaffle
 ```
 
-`broken_ingest` fails on purpose. Both agents are triggered by that failure and
-start on their own.
+That fires five pipelines against the live [Jaffle Shop API](https://jaffle-shop.dlthub.com/docs):
+one correct, four broken. The two that fail outright wake the agents.
 
 ## The two tracks
 
 | | file | what you do |
 |---|---|---|
-| **A. Verified agent** | `verified_agent.py` | nothing to write. Run it, read the diagnosis, evaluate it |
-| **B. Your own agent** | `my_agent.py` | edit it. Docstring is the prompt, parameters are the inputs, return type is the output |
+| **A. Verified agent** | `verified_agent.py` | nothing to write. Run it, read the diagnosis, judge it |
+| **B. Your own agent** | `my_agent.py`, `alerts.py` | edit them. Docstring is the prompt, parameters are the inputs, return type is the output |
 
-Track A runs `dlthub-platform:job-inspector` from the workbench: its prompt,
-tools, skills and output schema all come from its `AGENT.md`. Track B defines
-the same three things in Python instead. Both deploy together, so a group can
-do A first and use it as a reference for B.
+`jaffle_shop/` holds one correct pipeline and four broken ones, and the split
+between them is the point:
 
-Writing an `AGENT.md` rather than Python, or an agent skill, is documented in
-`BACKGROUND_AGENTS.md` in the dltHub AI harness.
+| pipeline | outcome | the bug |
+|---|---|---|
+| `correct` | 935 / 10 / 6 rows | the reference |
+| `bad_config` | **fails** | `base_url` on `/api/v2/`, 404 on the first request |
+| `bad_incremental` | **fails** | `cursor_path` on a field the API does not have |
+| `bad_pagination` | **green**, 100 of 935 rows | paginator reads `next` from the body; this API uses the `Link` header |
+| `bad_selector` | **green**, 0 of 6 rows | `data_selector` points at `data.results`; the API returns a bare array |
+
+Only the first two wake an agent. **The two green ones are Track B's real
+problem**: a job-status trigger cannot see them, because nothing failed. An
+agent that catches those has to compare row counts against `correct`, and that
+is worth more than anything triggered by a red run.
+
+`alerts.py` is where Track B starts. It already fires on failure and writes a
+row saying *that* something broke; it cannot say *why*, because a trigger
+carries no logs, no traceback and no counts.
 
 ## The other jobs
 
@@ -51,7 +63,7 @@ Writing an `AGENT.md` rather than Python, or an agent skill, is documented in
 |---|---|---|---|
 | `loop_probe` | yes | no | can the loop authenticate at all |
 | `endpoint_report` | no | no | which endpoint resolved, and whether `AGENT__*` arrived |
-| `broken_ingest` | no | no | fails on purpose, to fire the triggers |
+| `alerts` | no | yes | records that a job failed |
 
 Switch loops per shell, default `pydantic-ai`:
 
@@ -60,8 +72,7 @@ AGENT_DEMO_LOOP=claude-agent-sdk uv run dlthub local run loop_probe
 ```
 
 `claude-agent-sdk` runs Claude Code, so it takes Anthropic models only, but it
-can use an ambient `claude` login instead of a key. `pydantic-ai` serves every
-provider and always needs one.
+can use an ambient `claude` login instead of a key.
 
 ## Model keys
 

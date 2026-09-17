@@ -18,7 +18,8 @@ from typing import Literal
 from dlt.hub.run import Doc, TAgentOutput, TJobRunContext, agent
 from typing_extensions import Annotated
 
-from jobs import broken_ingest, mask
+from diagnostics import mask
+from jaffle_shop.bad_incremental import load_jaffle_bad_incremental
 
 AGENT_LOOP = os.getenv("AGENT_DEMO_LOOP", "pydantic-ai")
 """The loop that runs the model. `pydantic-ai` serves every provider and always
@@ -48,7 +49,7 @@ class CrashReport(TAgentOutput):
     # Every platform tool requires `context: read`. Drop it and the agent is
     # served no platform tools, with no error to tell you so.
     access={"local": ["read"], "data": ["read"], "context": ["read"]},
-    trigger=[broken_ingest.fail],
+    trigger=[load_jaffle_bad_incremental.fail],
     limits={"max_turns": 30},
     expose={"display_name": "My agent"},
 )

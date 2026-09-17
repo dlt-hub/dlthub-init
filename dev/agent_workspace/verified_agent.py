@@ -13,7 +13,7 @@ import os
 
 from dlt.hub.run import agent
 
-from jobs import broken_ingest
+from jaffle_shop.bad_config import load_jaffle_bad_config
 
 AGENT_LOOP = os.getenv("AGENT_DEMO_LOOP", "pydantic-ai")
 """The loop that runs the model. `pydantic-ai` serves every provider and always
@@ -23,6 +23,6 @@ Code login instead. Override per shell rather than editing this file."""
 job_inspector = agent(
     "dlthub-platform:job-inspector",
     loop=AGENT_LOOP,
-    trigger=[broken_ingest.fail],
+    trigger=[load_jaffle_bad_config.fail],
     expose={"display_name": "Job inspector (verified)"},
 )
