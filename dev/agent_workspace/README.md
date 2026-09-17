@@ -1,7 +1,7 @@
 # Agent jobs workspace
 
 Dev-only workspace for the background agents hackathon: five pipelines that fail
-in four different ways, and two agents that diagnose them.
+in four different ways, and the scaffolding to write agents that diagnose them.
 
 `make workspace-agent` from the repo root builds it into `examples/agent-workspace`
 and prints the commands to deploy it. It lives outside `src/` because it pins
@@ -20,22 +20,23 @@ Fire them all with `dlthub job trigger tag:jaffle`.
 | `bad_pagination` | **green**, 100 of 935 rows | paginator reads `next` from the body; this API uses the `Link` header |
 | `bad_selector` | **green**, 0 of 6 rows | `data_selector` points at `data.results`; the API returns a bare array |
 
-Only the two that fail wake an agent. **The two green ones lose data without
-failing**, so no job-status trigger can see them. Catching those means comparing
-row counts against `correct`.
+Two fail outright. **The other two lose data without failing** — they finish
+green, so no job-status trigger sees them at all.
 
-## The two tracks
+## The two steps
 
-| | file | what you do |
-|---|---|---|
-| **A. Verified agent** | `verified_agent.py` | nothing to write. Run it, judge the diagnosis, and find what it cannot see |
-| **B. Your own agent** | `my_agent.py` | edit it. Docstring is the prompt, parameters are the inputs, return type is the output |
+**1. Set up the verified agent.** `verified_agent.py` is a stub with the three
+lines you need: declare `dlthub-platform:job-inspector` and give it a trigger.
+Add it to `__deployment__.py`, deploy, and run `dlthub job trigger tag:jaffle`.
+Each team watches a different pipeline, so we see different failures. Then read
+what it says: is the diagnosis right, and useful to someone who has to act on it?
 
-`alerts.py` is where Track B starts: it fires on failure and records *that*
-something broke, but cannot say *why*, because a trigger carries no logs or counts.
+**2. Write your own.** `my_agent.py` is a stub; `example_agent.py` is a working
+agent to copy. Pick something the workspace cannot do yet — `alerts.py` records
+that a job failed but never why, and nothing wakes for the two green pipelines.
 
-`my_agent.py` is a working agent, not a blank template. Copy its shape — the
-`access`, `tools` and `Entity` declarations are all load-bearing.
+A fresh deploy has no agents. Both steps end the same way: write a file, add it
+to `__deployment__.py`, deploy.
 
 ## The other jobs
 
