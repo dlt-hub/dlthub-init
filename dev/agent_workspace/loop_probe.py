@@ -17,4 +17,4 @@ def loop_probe(run_context: TJobRunContext = None) -> TAgentOutput:
 
     Call no tools. Do nothing else.
     """
-    return asyncio.run(run_context["ai_loop"].run({}))
+    return asyncio.run(run_context["ai_loop"].run())

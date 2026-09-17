@@ -15,10 +15,9 @@ import asyncio
 import os
 from typing import Literal
 
-from dlt.hub.run import Doc, TAgentOutput, TJobRunContext, agent
-from typing_extensions import Annotated
+from dlt.common.typing import Annotated, Doc
+from dlt.hub.run import Entity, TAgentOutput, TJobRunContext, agent
 
-from diagnostics import mask
 from jaffle_shop.bad_incremental import load_jaffle_bad_incremental
 
 AGENT_LOOP = os.getenv("AGENT_DEMO_LOOP", "pydantic-ai")
@@ -33,7 +32,9 @@ class CrashReport(TAgentOutput):
     Descriptions are not decoration: the model reads them when it fills a field.
     """
 
-    failed_run_id: Annotated[str, Doc("The run this agent was triggered by")]
+    # `Entity` marks this as a workspace entity rather than a plain string, so the
+    # run reports it in `object` and shows up on that run's page in the web UI.
+    failed_run_id: Annotated[str, Entity("job-run"), Doc("The run this agent was triggered by")]
     classification: Annotated[
         Literal["config", "code", "upstream_data", "unknown"],
         Doc("What kind of failure it was"),
@@ -53,10 +54,18 @@ class CrashReport(TAgentOutput):
     limits={"max_turns": 30},
     expose={"display_name": "My agent"},
 )
-def my_agent(run_context: TJobRunContext = None) -> CrashReport:
+def my_agent(
+    # Every input is a job configuration key (`-c failed_run_id=...`). The first
+    # entity-typed one also becomes `expose.object_input`, which is how the web UI
+    # offers this agent from a failed run's row. Not required: a `job.fail` trigger
+    # supplies nothing, and a required input with no value fails the run.
+    failed_run_id: Annotated[str, Entity("job-run")] = "",
+    run_context: TJobRunContext = None,
+) -> CrashReport:
     """Diagnose the run that triggered you. Do not repair anything.
 
-    A `job.fail` trigger names the job that failed but not the run, so find it:
+    Investigate run `{{ failed_run_id }}`. It is usually empty, because a
+    `job.fail` trigger names the job that failed but not the run. Find it:
 
     1. `dlthub_get_run` on your own run id, `{{ run_context.run_id }}`. Its
        `prev_run_id` is the run that failed. Report it as `failed_run_id`.
@@ -65,13 +74,5 @@ def my_agent(run_context: TJobRunContext = None) -> CrashReport:
 
     Explain the failure in `summary`. Do not trigger any run.
     """
-    _dump_env()
-    return asyncio.run(run_context["ai_loop"].run({}))
-
-
-def _dump_env() -> None:
-    """Prints the run environment, secrets masked, so credential injection is visible."""
-    print("--- run environment ---", flush=True)
-    for name in sorted(os.environ):
-        print(f"  {name}={mask(name, os.environ[name])}", flush=True)
-    print("--- end run environment ---", flush=True)
+    # `inputs=` by keyword: the first positional argument is `instructions`.
+    return asyncio.run(run_context["ai_loop"].run(inputs={"failed_run_id": failed_run_id}))
