@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-10-07
+
 ### Changed
 - Refreshed the bundled minimal workspace `uv.lock` to the latest within-constraint versions (notably `dlt` 1.30.0 → 1.31.0, `dlthub-client` 0.28.4 → 0.28.7, `marimo` 0.24.0 → 0.25.1, `duckdb` 1.5.5 → 1.5.6, `fastmcp` 3.4.7 → 4.0.11, `mcp` 1.29.1 → 2.3.0, `cyclopts` 4.23.3 → 5.2.0, `sqlglot` 30.17 → 30.21), plus transitive updates. `dlthub` is unchanged at 0.30.0.
 - Synced the bundled minimal workspace dependencies with dlt 1.31.0's `WORKSPACE_DEPS`: raised `fastmcp` to `>=3.1.0` and dropped the explicit `croniter` entry (it is now a core `dlt` dependency and still resolves in the lock).
