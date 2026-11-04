@@ -1,0 +1,10 @@
+# Written by the app selftest to prove `workflows: write`. Deleted by the same run.
+# Manual trigger only, so it cannot run even while it briefly exists.
+name: app selftest probe
+on:
+  workflow_dispatch:
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
