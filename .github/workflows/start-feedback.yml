@@ -1,0 +1,74 @@
+# Installed here by the engineering agent loop. Starts `review` on a pull request the loop
+# opened when a reviewer asks for a change on it. No model is called and no secret is read.
+#
+# Written by a deployment from dlt-hub/engineering-agent-loop; edit it there, not here.
+name: start-feedback
+
+on:
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  # the reaction below needs it; a review comment's reactions endpoint sits under `pulls`.
+  pull-requests: write
+
+jobs:
+  # one job, because a run started by these events leaves a check run on the head per job in
+  # it, skipped or not. `review` has seven.
+  start-feedback:
+    runs-on: ubuntu-latest
+    # an approval ends the conversation, and a `commented` review's inline comments arrive as
+    # the event below it. A bot's own comment would be the loop answering its own reply.
+    #
+    # The association is here rather than only in the brief, and that is for a public target.
+    # `review` drops a thread whose author holds no write access and names it in the state
+    # comment, so on a private repository, where only a collaborator can comment at all, this
+    # job could start for anyone and report what it skipped. A public repository takes a
+    # comment from anyone on the internet, and each one is a run. The pass still costs no
+    # model and writes nothing, so what is being refused is a stranger spending Actions
+    # minutes at will. What it costs is the dropped-thread sentence for a non-collaborator,
+    # who now gets no reply at all.
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'agent:authored')
+      && (github.event_name != 'pull_request_review'
+          || (github.event.review.state == 'changes_requested'
+              && github.event.review.user.type != 'Bot'
+              && contains(fromJSON('["OWNER", "MEMBER"]'),
+                          github.event.review.author_association)))
+      && (github.event_name != 'pull_request_review_comment'
+          || (github.event.comment.user.type != 'Bot'
+              && contains(fromJSON('["OWNER", "MEMBER"]'),
+                          github.event.comment.author_association)))
+    steps:
+      # the reply takes minutes; this says the comment was picked up. Only for an account whose
+      # comment the pass will act on, which is the same test `review` makes on the thread.
+      # A `Request changes` review gets none: GitHub has no reactions endpoint for a review.
+      - name: Acknowledge the comment this pass was started by
+        if: >-
+          github.event_name == 'pull_request_review_comment'
+          && contains(fromJSON('["OWNER", "MEMBER"]'), github.event.comment.author_association)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          COMMENT: ${{ github.event.comment.id }}
+        run: |
+          set -euo pipefail
+          gh api --silent -X POST "repos/$GH_REPO/pulls/comments/$COMMENT/reactions" \
+            -f content=eyes
+
+      # only the number travels: `review` fetches the threads and the change requests itself.
+      - name: Start review on the pull request a reviewer asked about
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # `gh` resolves the repository from the checkout, and this job has none.
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          REF: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          echo "::notice::starting review on #$PR, where a reviewer asked for a change."
+          gh workflow run review.lock.yml --ref "$REF" -f pr_number="$PR"

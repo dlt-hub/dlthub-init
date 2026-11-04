@@ -1,0 +1,358 @@
+# Installed here by the engineering agent loop. Prepares the dependency bump this repository
+# gets after a `dlt`, `dlthub` or `dlthub-client` release: it runs the recipe, writes the
+# changelog entry, opens an issue and a pull request, and starts `review` on the pull request.
+# No model is called by this workflow.
+#
+# Written by a deployment from dlt-hub/engineering-agent-loop; edit it there, not here.
+#
+# PyPI is the trigger because the lock resolves from the index, and a GitHub release is not
+# reliably behind the upload: of the five most recent releases of the three packages, read
+# 2026-11-04, four reached PyPI first and one reached it 8m 29s after the release announcing
+# it. A run started then re-resolves what the lock already holds. A release event in another
+# repository also cannot start a workflow here without a credential in that repository.
+#
+# The release itself stays a person's act and cannot be otherwise: `make publish` reads a
+# PyPI token from an interactive prompt and `require-posthog-key` reads a key out of an
+# untracked `.make.env`. What is automated is the bump, and it stops at a merged pull request.
+name: bump-dlthub-init
+
+on:
+  schedule:
+    # Hourly, off the hour: a release reaches the index at no particular minute.
+    - cron: '23 * * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Run the recipe even when the lock already resolves the latest releases
+        type: boolean
+        default: false
+  # The source repositories may send this later. Nothing sends it today, and the schedule is
+  # what the bump rests on until something does.
+  repository_dispatch:
+    types: [dlt-release, dlthub-release, dlthub-client-release]
+
+# Every write is the loop's own App, which is the identity every other write it makes carries.
+permissions:
+  contents: read
+
+# One bump at a time. Queued rather than cancelled: a run that has already pushed a branch
+# must finish opening the pull request for it.
+concurrency:
+  group: bump-dlthub-init
+  cancel-in-progress: false
+
+env:
+  # The scaffold this repository ships, and the lock a release has to reach.
+  SCAFFOLD: src/dlthub_init/scaffolds/minimal_workspace
+  # The three whose releases are what this exists to follow. `dlt` and `dlthub` are the
+  # workspace runtime; `dlthub-client` is what a scaffolded workspace talks to the platform
+  # with. Everything else in the lock moves as a transitive.
+  WATCHED: dlt dlthub dlthub-client
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint a token for the loop's App
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.AGENT_LOOP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AGENT_LOOP_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      # Cheap, and the whole of what an hourly run costs when there is nothing to do: three
+      # reads of the index and one of a file already in the checkout.
+      - name: Is the bundled lock behind a release
+        id: decide
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+
+          # An open bump stops the next one. A pull request waiting for a reviewer is the
+          # normal case; an issue carrying `agent:needs-human` and no pull request is a recipe
+          # that failed, and the loop saying it will not act again until a person looks.
+          # Matched on the branch name and the label rather than on a search qualifier:
+          # `head:` is not one GitHub's issue search understands, and a search that matches
+          # nothing reads as "no bump is open" and opens a second one.
+          open_prs=$(gh pr list --state open --label agent:authored --limit 100 \
+            --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("chore/bump-scaffold-"))] | length')
+          # `gh issue list` excludes pull requests, and the only issues this loop opens here
+          # are the bump's own.
+          open_issues=$(gh issue list --state open --label agent:authored --limit 100 \
+            --json number --jq 'length')
+          if [ "$open_prs" != "0" ] || [ "$open_issues" != "0" ]; then
+            echo "::notice::a bump is already open ($open_prs pull request(s), $open_issues issue(s)); nothing to do."
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          behind=""
+          for pkg in $WATCHED; do
+            latest=$(curl -fsSL "https://pypi.org/pypi/${pkg}/json" | jq -r '.info.version')
+            # The lock is TOML; this reads the version line of the package's own table, which
+            # is the two lines after `[[package]]` and is what `bump-changelog-entry.cjs`
+            # reads as well.
+            locked=$(awk -v p="$pkg" '
+              /^\[\[package\]\]/ { want=0 }
+              $0 == "name = \"" p "\"" { want=1; next }
+              want && /^version = / { gsub(/^version = "|"$/, ""); print; exit }
+            ' "${SCAFFOLD}/uv.lock")
+            echo "${pkg}: locked ${locked:-none}, PyPI ${latest}"
+            [ "$locked" = "$latest" ] || behind="${behind}${behind:+, }${pkg} ${locked:-none} → ${latest}"
+          done
+
+          if [ -z "$behind" ] && [ "$FORCE" != "true" ]; then
+            echo "::notice::the bundled lock already resolves the latest release of each watched package."
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "bump=true" >> "$GITHUB_OUTPUT"
+          echo "behind=${behind:-nothing on the index moved; this run was forced}" >> "$GITHUB_OUTPUT"
+
+      # The installer puts `uv` in `~/.local/bin`, which is not on a runner's PATH.
+      - name: Install uv
+        if: steps.decide.outputs.bump == 'true'
+        run: |
+          set -euo pipefail
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
+
+      # Kept so the changelog entry is derived from what the recipe did rather than from what
+      # it was asked to do. `git stash` would do the same and would also hide a failure.
+      - name: Keep the locks and the scaffold deps as they are now
+        if: steps.decide.outputs.bump == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/bump-before
+          cp uv.lock /tmp/bump-before/root.uv.lock
+          cp "${SCAFFOLD}/uv.lock" /tmp/bump-before/scaffold.uv.lock
+          cp "${SCAFFOLD}/pyproject.toml" /tmp/bump-before/scaffold.pyproject.toml
+          # `generate_skills.py` carries the pinned workbench ref that `make update-skills`
+          # moves, and the entry names the new one.
+          sed -n 's/^WORKBENCH_REF_SHORT = "\(.*\)"$/\1/p' scripts/generate_skills.py \
+            > /tmp/bump-before/workbench-ref
+
+      # One step, because the failure report has to name which command failed and show its
+      # output, and a step's own name is not readable from a later step.
+      #
+      # The order is the repository's own fail-fast reading, not `make ci`'s: `lock-upgrade`
+      # and `scaffold-lock-upgrade` first, then the deps sync a dlt release makes necessary,
+      # then the three guards. `make ci` runs `test-integration`, which invokes the real CLI
+      # and a `uv sync`, so a drift found here costs minutes less than the same drift found
+      # there.
+      - name: Run the bump recipe
+        id: recipe
+        if: steps.decide.outputs.bump == 'true'
+        run: |
+          set -uo pipefail
+          run() {
+            name="$1"; shift
+            echo "::group::$name"
+            if ! "$@" > /tmp/step.log 2>&1; then
+              cat /tmp/step.log
+              echo "::endgroup::"
+              printf '%s\n' "$name" > /tmp/bump-failed-step
+              tail -n 60 /tmp/step.log > /tmp/bump-failed-log
+              echo "::error::$name failed"
+              exit 1
+            fi
+            cat /tmp/step.log
+            echo "::endgroup::"
+          }
+
+          run "make dev" make dev
+          run "make lock-upgrade" make lock-upgrade
+          run "make scaffold-lock-upgrade" make scaffold-lock-upgrade
+          # Fails after a dlt release that changed WORKSPACE_DEPS, which is the whole reason
+          # the sync below it exists. Not run through `run`, because its failure is expected.
+          if make scaffold-deps-check; then
+            echo "scaffold deps already match dlt's WORKSPACE_DEPS"
+          else
+            run "make scaffold-deps-sync" make scaffold-deps-sync
+            run "make scaffold-lock-upgrade (after the deps sync)" make scaffold-lock-upgrade
+            run "make scaffold-deps-check" make scaffold-deps-check
+          fi
+          run "make scaffold-lock-check" make scaffold-lock-check
+          run "make update-skills" make update-skills
+          run "make check-skills" make check-skills
+
+      - name: Write the changelog entry
+        id: entry
+        if: steps.decide.outputs.bump == 'true'
+        run: |
+          set -uo pipefail
+          # `--porcelain` rather than `git diff`, because `make update-skills` can add a file
+          # and an untracked one is invisible to a diff.
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "::warning::the recipe changed nothing. A release outside the scaffold's own version constraints cannot be resolved into the lock, and widening a constraint in ${SCAFFOLD}/pyproject.toml is a person's call."
+            echo "wrote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          printf '%s\n' "writing the changelog entry" > /tmp/bump-failed-step
+          set +e
+          node "${GITHUB_WORKSPACE}/.github/workflows/bump-changelog-entry.cjs" \
+            --scaffold-before /tmp/bump-before/scaffold.uv.lock \
+            --scaffold-after "${SCAFFOLD}/uv.lock" \
+            --root-before /tmp/bump-before/root.uv.lock \
+            --root-after uv.lock \
+            --direct "${SCAFFOLD}/pyproject.toml" \
+            --root-direct pyproject.toml \
+            --deps-before /tmp/bump-before/scaffold.pyproject.toml \
+            --deps-after "${SCAFFOLD}/pyproject.toml" \
+            --skills-before "$(cat /tmp/bump-before/workbench-ref)" \
+            --skills-after "$(sed -n 's/^WORKBENCH_REF_SHORT = "\(.*\)"$/\1/p' scripts/generate_skills.py)" \
+            --changelog CHANGELOG.md > /tmp/bump-entry.md
+          code=$?
+          set -e
+
+          # Exit 1 is the script saying no package version moved, which a lock rewritten for
+          # its metadata alone can produce. That is a bump with nothing to say rather than a
+          # failure, and opening a pull request for it would spend a reviewing pass on it.
+          if [ "$code" != "0" ]; then
+            echo "::warning::the recipe rewrote a lock but moved no package version, so there is no entry to write and no pull request to open."
+            git checkout -- . && git clean -fdq
+            echo "wrote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          rm -f /tmp/bump-failed-step
+          cat /tmp/bump-entry.md
+          echo "wrote=true" >> "$GITHUB_OUTPUT"
+
+      # The same suite the branch's own CI will run. Running it here is what keeps a broken
+      # bump from reaching a reviewing pass at all, and its failure is reported on the issue.
+      - name: make ci
+        if: steps.entry.outputs.wrote == 'true'
+        run: |
+          set -uo pipefail
+          printf '%s\n' "make ci" > /tmp/bump-failed-step
+          if ! make ci > /tmp/ci.log 2>&1; then
+            cat /tmp/ci.log
+            tail -n 60 /tmp/ci.log > /tmp/bump-failed-log
+            echo "::error::make ci failed"
+            exit 1
+          fi
+          cat /tmp/ci.log
+          rm -f /tmp/bump-failed-step
+
+
+      # The bodies are written line by line rather than from a heredoc: a heredoc's terminator
+      # has to be unindented, and an unindented line inside a `run: |` block ends the block.
+      - name: Open the issue, the pull request, and start review
+        if: steps.entry.outputs.wrote == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          BEHIND: ${{ steps.decide.outputs.behind }}
+          BASE: ${{ github.event.repository.default_branch }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          branch="chore/bump-scaffold-${GITHUB_RUN_ID}"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          {
+            echo "On the index: ${BEHIND}."
+            echo
+            echo "\`bump-dlthub-init.yml\` ran the bump recipe on [run ${GITHUB_RUN_ID}](${run_url})"
+            echo "and opened a pull request from it. The release itself is a person's act and is"
+            echo "not part of this."
+            echo
+            echo '## Acceptance criteria'
+            echo
+            echo '- [ ] Both `uv.lock` files resolve the latest versions their `pyproject.toml` constraints allow: `make lock-check` and `make scaffold-lock-check` pass.'
+            echo '- [ ] The bundled workspace dependencies match dlt'"'"'s `WORKSPACE_DEPS`: `make scaffold-deps-check` passes.'
+            echo '- [ ] `skills/` matches what `scripts/generate_skills.py` produces at its pinned ref: `make check-skills` passes.'
+            echo '- [ ] `CHANGELOG.md` carries a `### Changed` block under `## [Unreleased]` naming every direct dependency of the bundled workspace whose version moved, with its old and new version.'
+            echo '- [ ] `make ci` passes.'
+            echo
+            echo '## Scope'
+            echo
+            echo "Only the files the recipe writes: both \`uv.lock\` files, \`${SCAFFOLD}/pyproject.toml\`,"
+            echo 'the pinned ref in `scripts/generate_skills.py`, `skills/` and `CHANGELOG.md`. The package'
+            echo 'version in the root `pyproject.toml` is a release'"'"'s to move and is not touched here.'
+          } > /tmp/bump-issue.md
+
+          # The issue carries the tier. Review reads a pull request's `risk:*` label off the
+          # issue it closes rather than off the pull request, so this label is the whole of the
+          # risk classification for a bump: there is no triage pass to write one.
+          issue=$(gh issue create \
+            --title 'chore: refresh the bundled workspace lock' \
+            --label risk:low --label agent:authored \
+            --body-file /tmp/bump-issue.md | sed 's#.*/##')
+          echo "::notice::opened issue #${issue}"
+
+          git config user.name  "${APP_SLUG}[bot]"
+          git config user.email "${APP_SLUG}[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -A
+          git commit -q -m 'chore: refresh the bundled workspace lock'
+          git push -q origin "$branch"
+
+          {
+            echo "Closes #${issue}"
+            echo
+            echo "On the index: ${BEHIND}."
+            echo
+            echo '## What changed'
+            echo
+            cat /tmp/bump-entry.md
+            echo
+            echo '## How to check it'
+            echo
+            echo "\`make ci\` ran on [run ${GITHUB_RUN_ID}](${run_url}) before this branch was pushed,"
+            echo 'and runs again on the branch. It covers both lock guards, the scaffold deps guard, the'
+            echo 'skills drift guard, the unit and integration suites and the wheel build.'
+            echo
+            echo "Neither \`uv.lock\` is readable as a diff. The entry above is the account of them, and"
+            echo "\`${SCAFFOLD}/pyproject.toml\` is what decides what they may resolve to."
+          } > /tmp/bump-pr.md
+
+          pr=$(gh pr create --base "$BASE" --head "$branch" \
+            --title 'chore: refresh the bundled workspace lock' \
+            --label agent:authored \
+            --body-file /tmp/bump-pr.md | sed 's#.*/##')
+          echo "::notice::opened pull request #${pr}"
+
+          gh workflow run review.lock.yml --ref "$BASE" -f pr_number="$pr"
+
+      # A failed recipe says so where a person will see it, and stops the next hourly run: the
+      # decide step above reads an open issue as a bump already in flight.
+      - name: Report a failed recipe on an issue
+        if: failure() && steps.decide.outputs.bump == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          BEHIND: ${{ steps.decide.outputs.behind }}
+        run: |
+          set -uo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          step="$(cat /tmp/bump-failed-step 2>/dev/null || echo 'a step before the recipe')"
+          {
+            echo "On the index: ${BEHIND}."
+            echo
+            echo "\`bump-dlthub-init.yml\` could not prepare this bump. **\`${step}\` failed** on"
+            echo "[run ${GITHUB_RUN_ID}](${run_url}). No branch was pushed and no pull request opened."
+            echo
+            echo '```'
+            cat /tmp/bump-failed-log 2>/dev/null || echo '(no output was captured)'
+            echo '```'
+            echo
+            echo 'Nothing automated will try again while this issue is open. Close it once the cause is'
+            echo 'fixed, or dispatch `bump-dlthub-init.yml` by hand.'
+          } > /tmp/bump-failure.md
+          gh issue create \
+            --title 'chore: refresh the bundled workspace lock' \
+            --label risk:low --label agent:authored --label agent:needs-human \
+            --body-file /tmp/bump-failure.md \
+            || echo "::error::could not open the issue reporting ${step}"

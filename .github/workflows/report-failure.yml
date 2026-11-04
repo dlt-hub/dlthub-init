@@ -1,0 +1,190 @@
+# Installed here by the engineering agent loop. Says on the issue or pull request a run was
+# working on that the run did not finish, in the cases where the run itself could not say so.
+# No model is called.
+#
+# Written by a deployment from dlt-hub/engineering-agent-loop; edit it there, not here.
+name: report-failure
+
+on:
+  workflow_run:
+    workflows: [triage, dispatch, review]
+    types: [completed]
+
+permissions:
+  actions: read
+  # both: the ticket is as often a pull request as an issue, and reading one's comments is
+  # refused with `issues: read` alone even though they are written through the issues API.
+  issues: read
+  pull-requests: read
+
+jobs:
+  report-failure:
+    # a run in which every job skipped decided not to start, and says so itself wherever a
+    # person can act on it. A run reporting success is read like any other: the daily credit
+    # budget stops the agent without failing a job.
+    if: github.event.workflow_run.conclusion != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask whether this run left its ticket with nothing
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # `gh` resolves the repository from the checkout, and this job has none.
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          # the workflow's name, where `workflow_run.name` is this run's own name and so
+          # carries the ticket number with it.
+          STAGE: ${{ github.event.workflow.name }}
+          # the stage puts the ticket number in its own run name, which is the only place a
+          # finished run still carries it.
+          TITLE: ${{ github.event.workflow_run.display_title }}
+          # what the comment read below is bounded by: a notice for this run was
+          # written while it was running, if it was written at all.
+          SINCE: ${{ github.event.workflow_run.created_at }}
+        run: |
+          set -euo pipefail
+
+          NUMBER=$(printf '%s' "$TITLE" | sed -n 's/.*#\([0-9][0-9]*\).*/\1/p')
+          if [ -z "$NUMBER" ]; then
+            echo "::notice::run $RUN_ID names no issue or pull request."
+            exit 0
+          fi
+
+          gh api "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?per_page=100" > /tmp/jobs.json
+          conclusion_of() {
+            jq -r --arg n "$1" '[.jobs[] | select(.name == $n)][0].conclusion // ""' /tmp/jobs.json
+          }
+
+          # `safe_outputs` is where every result this loop writes is written, its own report of
+          # a failed pass included. Where it succeeded the run has already said what it had to.
+          if [ "$(conclusion_of safe_outputs)" = "success" ]; then
+            echo "::notice::run $RUN_ID wrote its own result on #$NUMBER."
+            exit 0
+          fi
+
+          # the furthest the run got, which is the job holding the cause. `conclusion` is left
+          # out: nothing here reads what it writes, and it is red whenever an earlier job is.
+          FAILED=$(jq -r '
+            [ .jobs[]
+              | select(.name != "conclusion")
+              | select(.conclusion == "failure" or .conclusion == "cancelled"
+                       or .conclusion == "timed_out") ]
+            | if length == 0 then "" else .[-1].name end' /tmp/jobs.json)
+
+          STEP=""
+          if [ -n "$FAILED" ]; then
+            STEP=$(jq -r --arg n "$FAILED" '
+              [.jobs[] | select(.name == $n)][0].steps // []
+              | map(select(.conclusion == "failure" or .conclusion == "cancelled"
+                           or .conclusion == "timed_out"))
+              | if length == 0 then "" else .[0].name end' /tmp/jobs.json)
+          elif [ "$(conclusion_of activation)" = "success" ] \
+            && [ "$(conclusion_of agent)" = "skipped" ]; then
+            # the one stop that fails no job: the agent runs unless the daily budget is spent.
+            FAILED=daily-budget
+          else
+            echo "::notice::run $RUN_ID failed no job, so there is nothing to report on #$NUMBER."
+            exit 0
+          fi
+
+          # the run may already have reported itself: the step that does so runs inside
+          # `safe_outputs`, ahead of the step that writes everything else.
+          # `since` rather than a sort: this endpoint takes no `sort`, and ignores one, so a
+          # long thread would otherwise be read from its oldest page.
+          if gh api "repos/$GH_REPO/issues/$NUMBER/comments?per_page=100&since=$SINCE" \
+               --jq '.[] | select(.body | contains("agent-loop: failure notice")
+                                          or contains("agent-loop: run notice")) | .body' \
+               > /tmp/loop-comments.txt; then
+            if grep -qF "/actions/runs/$RUN_ID" /tmp/loop-comments.txt; then
+              echo "::notice::run $RUN_ID has already been reported on #$NUMBER."
+              exit 0
+            fi
+          else
+            # a read nobody could make must not become a silent decision either way. A second
+            # notice is worth more than a missing one, so it goes on and says this here.
+            echo "::warning::could not read the comments on #$NUMBER, so this may repeat a"
+            echo "::warning::notice the run has already written there."
+          fi
+
+          # a person stopping a run is not a fault in it, and the job it was stopped in says
+          # nothing about why.
+          if [ "$RUN_CONCLUSION" = cancelled ]; then
+            FAILED=cancelled
+            STEP=""
+          fi
+
+          case "$FAILED" in
+            cancelled)
+              WHAT='The run was cancelled before it finished, so nothing it produced was written.' ;;
+            daily-budget)
+              WHAT='No model was started: this repository'"'"'s daily AI credit budget was already spent when the run began. That budget is `GH_AW_DEFAULT_MAX_DAILY_AI_CREDITS`, a variable on this repository.' ;;
+            event_filter|pre_activation)
+              WHAT='It stopped before any work began, in one of the checks this workflow makes first.' ;;
+            activation)
+              WHAT='It stopped before the agent started. The commonest reason is that the workflow file and the generated copy beside it no longer match each other, which a fresh deployment fixes.' ;;
+            agent)
+              WHAT='The pass itself failed, and the step that reports a failed pass here did not run.' ;;
+            detection)
+              WHAT='The second model that reads a pass'"'"'s output before anything is written reached no verdict, so nothing the pass produced was written.' ;;
+            safe_outputs)
+              WHAT='The pass finished, and the step that writes its result into this repository failed. Nothing it produced was written.' ;;
+            *)
+              WHAT="It stopped in its \`$FAILED\` job." ;;
+          esac
+
+          {
+            echo '<!-- agent-loop: run notice -->'
+            echo
+            echo "### The \`$STAGE\` run did not finish"
+            echo
+            echo "$WHAT"
+            echo
+            if [ -n "$STEP" ]; then
+              echo "The step that failed is \`$STEP\`."
+              echo
+            fi
+            echo "The run is at $RUN_URL."
+            echo
+            echo '`agent:needs-human` is applied, and nothing else was written by this run.'
+            echo 'Fix the cause, then start this stage again.'
+          } > /tmp/agent-loop-run-notice.md
+
+          echo "::notice::run $RUN_ID stopped at $FAILED; reporting it on #$NUMBER."
+          {
+            echo "report=true"
+            echo "number=$NUMBER"
+          } >> "$GITHUB_OUTPUT"
+
+      # every write this loop makes goes through its GitHub App. Allowed to fail: a notice
+      # nobody could post must not redden the workflow whose whole job is to post one.
+      - name: Generate an App token for the notice
+        id: app-token
+        if: steps.decide.outputs.report == 'true'
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AGENT_LOOP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AGENT_LOOP_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-issues: write
+          # a comment or a label on a pull request is refused without this, even though both
+          # are written through the issues API. Measured: 403 on sandbox#185.
+          permission-pull-requests: write
+
+      - name: Say on the ticket that the run did not finish
+        if: steps.decide.outputs.report == 'true' && steps.app-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ steps.decide.outputs.number }}
+        # the two writes are independent, so a refused label does not hide a posted comment.
+        # Both failing leaves the run red, which is the only account left of the run below it.
+        run: |
+          rc=0
+          gh api --method POST "repos/$GH_REPO/issues/$NUMBER/comments" \
+            -F body=@- --silent < /tmp/agent-loop-run-notice.md || rc=1
+          gh api --method POST "repos/$GH_REPO/issues/$NUMBER/labels" \
+            -f 'labels[]=agent:needs-human' --silent || rc=1
+          exit $rc
