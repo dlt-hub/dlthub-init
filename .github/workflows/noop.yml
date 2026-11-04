@@ -1,0 +1,17 @@
+name: noop
+
+# Installed here by the engineering agent loop. A workflow with no side effects, so that the
+# loop's GitHub App can be checked for the permissions it claims by dispatching something that
+# costs nothing. Every other workflow the loop installs calls a model.
+#
+# Keep it doing nothing: it is fired from a token that is under test.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "reached — workflow_dispatch from the caller's token creates runs"
