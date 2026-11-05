@@ -37,8 +37,8 @@ upstream, then re-sync, or CI fails and the next sync reverts the edit.
 Knobs in `scripts/sync_workspace_deps.py`:
 - `BASE_SPECS` — specs this repo owns (`dlt[hub]`, `dlthub`, `dlthub-client`),
   emitted ahead of the synced entries and never overwritten by a sync.
-- `WORKSPACE_DEPS_MODULE` / `WORKSPACE_DEPS_NAME` — where the callable lives in
-  dlt; both fail loud if upstream moves or renames it.
+- `PROBE_SCRIPT` — `scripts/probe_workspace_deps.py`, the code run against the
+  locked dlt; it fails loud if upstream moves or renames `workspace_deps()`.
 
 The reference dlt version is whatever the scaffold's `uv.lock` resolves, so the
 lock is the only pin to maintain.

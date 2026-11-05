@@ -31,19 +31,8 @@ _DEPENDENCIES_RE = re.compile(r"^dependencies = \[$.*?^\]$", re.MULTILINE | re.D
 _LEADING_NAME_RE = re.compile(r"^\s*([A-Za-z0-9._-]+)")
 _NORMALIZE_RE = re.compile(r"[-_.]+")
 
-WORKSPACE_DEPS_MODULE = "dlt._workspace.cli.dlthub.utils"
-WORKSPACE_DEPS_NAME = "workspace_deps"
-LEGACY_WORKSPACE_DEPS_NAME = "WORKSPACE_DEPS"
+PROBE_SCRIPT = REPO_ROOT / "scripts" / "probe_workspace_deps.py"
 TIMEOUT = 300
-
-# runs under `uv run`; prints the list as one JSON line
-PROBE_SOURCE = f"""
-import importlib, json
-utils = importlib.import_module({WORKSPACE_DEPS_MODULE!r})
-fn = getattr(utils, {WORKSPACE_DEPS_NAME!r}, None)
-deps = fn() if fn is not None else list(getattr(utils, {LEGACY_WORKSPACE_DEPS_NAME!r}))
-print(json.dumps(list(deps)))
-"""
 
 
 class SyncError(Exception):
@@ -75,8 +64,7 @@ def probe_command(version: str, uv: str = "uv") -> list[str]:
         f"dlt=={version}",
         "python",
         "-I",
-        "-c",
-        PROBE_SOURCE,
+        str(PROBE_SCRIPT),
     ]
 
 
@@ -90,7 +78,7 @@ def parse_workspace_deps(stdout: str) -> list[str]:
     except ValueError as exc:
         raise SyncError(f"probe did not print JSON: {lines[-1]!r}") from exc
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise SyncError(f"{WORKSPACE_DEPS_NAME}() did not return a list of strings")
+        raise SyncError("workspace_deps() did not return a list of strings")
     return [str(item) for item in value]
 
 

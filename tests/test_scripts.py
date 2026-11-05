@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import generate_skills  # noqa: E402
+import probe_workspace_deps  # noqa: E402
 import sync_workspace_deps  # noqa: E402
 import update_skills  # noqa: E402
 
@@ -127,17 +128,17 @@ class ScaffoldDltVersionTest(unittest.TestCase):
             sync_workspace_deps.scaffold_dlt_version(lock)
 
 
-class ProbeSourceTest(unittest.TestCase):
-    """PROBE_SOURCE runs inside the throwaway env; exercise it against a fake dlt module here."""
+class ProbeScriptTest(unittest.TestCase):
+    """probe_workspace_deps.py runs inside the throwaway env; exercise it against a fake dlt module."""
 
     def _run_probe(self, **attrs):
-        module = types.ModuleType(sync_workspace_deps.WORKSPACE_DEPS_MODULE)
+        module = types.ModuleType(probe_workspace_deps.MODULE)
         for name, value in attrs.items():
             setattr(module, name, value)
         out = io.StringIO()
-        with patch.dict(sys.modules, {sync_workspace_deps.WORKSPACE_DEPS_MODULE: module}):
+        with patch.dict(sys.modules, {probe_workspace_deps.MODULE: module}):
             with contextlib.redirect_stdout(out):
-                exec(sync_workspace_deps.PROBE_SOURCE, {"__name__": "__probe__"})  # noqa: S102
+                probe_workspace_deps.main()
         return sync_workspace_deps.parse_workspace_deps(out.getvalue())
 
     def test_calls_workspace_deps_function(self):
@@ -195,7 +196,7 @@ class FetchWorkspaceDepsTest(unittest.TestCase):
         self.assertIn("--isolated", command)
         self.assertIn("--no-project", command)
         self.assertEqual(command[command.index("--with") + 1], "dlt==1.32.0")
-        self.assertEqual(command[-1], sync_workspace_deps.PROBE_SOURCE)
+        self.assertEqual(command[-1], str(sync_workspace_deps.PROBE_SCRIPT))
 
     def test_probe_failure_reports_stderr(self):
         with (
