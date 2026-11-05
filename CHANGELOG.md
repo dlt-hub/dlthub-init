@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `make scaffold-deps-sync` works with dlt 1.32.0, where `WORKSPACE_DEPS` became `workspace_deps()` (#43).
+
 ## [0.2.11] - 2026-10-07
 
 ### Changed

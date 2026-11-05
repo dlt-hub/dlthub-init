@@ -121,7 +121,7 @@ function renderEntry({ scaffold, root, direct, rootDirect = null, deps = null, s
     }
     if (deps.removed.length) said.push(`dropped ${deps.removed.map((n) => `\`${n}\``).join(', ')}`);
     bullets.push("- Synced the bundled minimal workspace dependencies with dlt's "
-      + `\`WORKSPACE_DEPS\`: ${said.join(', ')}.`);
+      + `\`workspace_deps()\`: ${said.join(', ')}.`);
   }
   if (root && root.moved.length + root.added.length + root.removed.length) {
     bullets.push(lockBullet({ what: 'the root `uv.lock`', diff: root, direct: rootDirect || direct }));

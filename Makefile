@@ -160,10 +160,10 @@ scaffold-lock-check: ## CI guard: fail if the bundled workspace uv.lock is out o
 		exit 1; \
 	fi
 
-scaffold-deps-sync: ## Sync the bundled workspace deps with dlt's WORKSPACE_DEPS; review the diff, re-run scaffold-lock-upgrade, and commit
+scaffold-deps-sync: ## Sync the bundled workspace deps with dlt's workspace_deps(); review the diff, re-run scaffold-lock-upgrade, and commit
 	uv run python scripts/sync_workspace_deps.py
 
-scaffold-deps-check: ## CI guard: fail if the bundled workspace deps drift from dlt's WORKSPACE_DEPS
+scaffold-deps-check: ## CI guard: fail if the bundled workspace deps drift from dlt's workspace_deps()
 	uv run python scripts/sync_workspace_deps.py --check
 
 #

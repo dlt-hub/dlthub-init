@@ -30,21 +30,21 @@ make ci       # everything CI runs
 The scaffold's `pyproject.toml` uses loose dependency ranges; the committed
 `uv.lock` pins exact versions for reproducible installs.
 
-Its dependency list is generated from dlt's `WORKSPACE_DEPS`, the same list dlt
-seeds from its own `dlthub init`. Don't hand-edit it: change `WORKSPACE_DEPS`
+Its dependency list is generated from dlt's `workspace_deps()`, the same list dlt
+seeds from its own `dlthub init`. Don't hand-edit it: change `workspace_deps()`
 upstream, then re-sync, or CI fails and the next sync reverts the edit.
 
 Knobs in `scripts/sync_workspace_deps.py`:
 - `BASE_SPECS` — specs this repo owns (`dlt[hub]`, `dlthub`, `dlthub-client`),
   emitted ahead of the synced entries and never overwritten by a sync.
-- `WORKSPACE_DEPS_MODULE` / `WORKSPACE_DEPS_NAME` — where the list lives in the
-  dlt wheel; both fail loud if upstream moves or renames it.
+- `PROBE_SCRIPT` — `scripts/probe_workspace_deps.py`, the code run against the
+  locked dlt; it fails loud if upstream moves or renames `workspace_deps()`.
 
 The reference dlt version is whatever the scaffold's `uv.lock` resolves, so the
 lock is the only pin to maintain.
 
 ```bash
-make scaffold-deps-sync     # pull WORKSPACE_DEPS from the locked dlt version
+make scaffold-deps-sync     # pull workspace_deps() from the locked dlt version
 make scaffold-deps-check    # CI drift guard
 make scaffold-lock-upgrade  # refresh the lock after a sync, then commit
 ```

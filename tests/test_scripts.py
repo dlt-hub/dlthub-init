@@ -1,15 +1,17 @@
 import contextlib
 import io
+import subprocess
 import sys
 import tempfile
+import types
 import unittest
-import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import generate_skills  # noqa: E402
+import probe_workspace_deps  # noqa: E402
 import sync_workspace_deps  # noqa: E402
 import update_skills  # noqa: E402
 
@@ -126,39 +128,98 @@ class ScaffoldDltVersionTest(unittest.TestCase):
             sync_workspace_deps.scaffold_dlt_version(lock)
 
 
-class ExtractWorkspaceDepsTest(unittest.TestCase):
-    def _wheel(self, source, name=sync_workspace_deps.WORKSPACE_DEPS_MODULE):
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as wheel:
-            wheel.writestr(name, source)
-        return buf.getvalue()
+class ProbeScriptTest(unittest.TestCase):
+    """probe_workspace_deps.py runs inside the throwaway env; exercise it against a fake dlt module."""
 
-    def test_parses_annotated_assignment(self):
-        wheel = self._wheel('WORKSPACE_DEPS: List[str] = [\n    "duckdb>=0.9",\n    "s3fs>=2022.4.0",\n]\n')
-        self.assertEqual(sync_workspace_deps.extract_workspace_deps(wheel), ["duckdb>=0.9", "s3fs>=2022.4.0"])
+    def _run_probe(self, **attrs):
+        module = types.ModuleType(probe_workspace_deps.MODULE)
+        for name, value in attrs.items():
+            setattr(module, name, value)
+        out = io.StringIO()
+        with patch.dict(sys.modules, {probe_workspace_deps.MODULE: module}):
+            with contextlib.redirect_stdout(out):
+                probe_workspace_deps.main()
+        return sync_workspace_deps.parse_workspace_deps(out.getvalue())
 
-    def test_parses_plain_assignment(self):
-        wheel = self._wheel('WORKSPACE_DEPS = ["duckdb>=0.9"]\n')
-        self.assertEqual(sync_workspace_deps.extract_workspace_deps(wheel), ["duckdb>=0.9"])
+    def test_calls_workspace_deps_function(self):
+        # dlt >= 1.32.0: the list is computed, so the function result is the source of truth
+        deps = self._run_probe(workspace_deps=lambda: ["duckdb>=0.9,<2", "s3fs>=2022.4.0"])
+        self.assertEqual(deps, ["duckdb>=0.9,<2", "s3fs>=2022.4.0"])
 
-    def test_ignores_dlt_imports(self):
-        wheel = self._wheel('from dlt.nope import missing\nWORKSPACE_DEPS = ["duckdb>=0.9"]\n')
-        self.assertEqual(sync_workspace_deps.extract_workspace_deps(wheel), ["duckdb>=0.9"])
+    def test_falls_back_to_legacy_constant(self):
+        # dlt < 1.32.0 exposes a module-level list instead
+        deps = self._run_probe(WORKSPACE_DEPS=("duckdb>=0.9",))
+        self.assertEqual(deps, ["duckdb>=0.9"])
 
-    def test_missing_module_raises(self):
-        wheel = self._wheel("WORKSPACE_DEPS = []\n", name="dlt/elsewhere.py")
+    def test_function_wins_over_constant(self):
+        deps = self._run_probe(workspace_deps=lambda: ["new>=1"], WORKSPACE_DEPS=["old>=1"])
+        self.assertEqual(deps, ["new>=1"])
+
+    def test_missing_both_raises(self):
+        with self.assertRaises(AttributeError):
+            self._run_probe()
+
+
+class ParseWorkspaceDepsTest(unittest.TestCase):
+    def test_reads_last_json_line(self):
+        # dlt may log to stdout before the probe prints; only the last line is the payload
+        stdout = 'some dlt notice\n["duckdb>=0.9", "s3fs>=2022.4.0"]\n'
+        self.assertEqual(sync_workspace_deps.parse_workspace_deps(stdout), ["duckdb>=0.9", "s3fs>=2022.4.0"])
+
+    def test_empty_output_raises(self):
         with self.assertRaises(sync_workspace_deps.SyncError):
-            sync_workspace_deps.extract_workspace_deps(wheel)
+            sync_workspace_deps.parse_workspace_deps("\n  \n")
 
-    def test_missing_name_raises(self):
-        wheel = self._wheel("OTHER_DEPS = []\n")
+    def test_non_json_raises(self):
         with self.assertRaises(sync_workspace_deps.SyncError):
-            sync_workspace_deps.extract_workspace_deps(wheel)
+            sync_workspace_deps.parse_workspace_deps("Traceback (most recent call last)")
 
-    def test_non_literal_raises(self):
-        wheel = self._wheel("WORKSPACE_DEPS = list(other)\n")
-        with self.assertRaises(sync_workspace_deps.SyncError):
-            sync_workspace_deps.extract_workspace_deps(wheel)
+    def test_non_list_of_strings_raises(self):
+        for payload in ['{"a": 1}', '["ok", 2]', '"duckdb"']:
+            with self.subTest(payload=payload), self.assertRaises(sync_workspace_deps.SyncError):
+                sync_workspace_deps.parse_workspace_deps(payload)
+
+
+class FetchWorkspaceDepsTest(unittest.TestCase):
+    def _completed(self, returncode=0, stdout="", stderr=""):
+        return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
+
+    def test_runs_probe_against_locked_version(self):
+        with (
+            patch.object(sync_workspace_deps.shutil, "which", return_value="/usr/bin/uv"),
+            patch.object(sync_workspace_deps.subprocess, "run") as run,
+        ):
+            run.return_value = self._completed(stdout='["duckdb>=0.9,<2"]\n')
+            self.assertEqual(sync_workspace_deps.fetch_workspace_deps("1.32.0"), ["duckdb>=0.9,<2"])
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], "/usr/bin/uv")
+        self.assertIn("--isolated", command)
+        self.assertIn("--no-project", command)
+        self.assertEqual(command[command.index("--with") + 1], "dlt==1.32.0")
+        self.assertEqual(command[-1], str(sync_workspace_deps.PROBE_SCRIPT))
+
+    def test_probe_failure_reports_stderr(self):
+        with (
+            patch.object(sync_workspace_deps.shutil, "which", return_value="/usr/bin/uv"),
+            patch.object(sync_workspace_deps.subprocess, "run") as run,
+        ):
+            run.return_value = self._completed(returncode=1, stderr="error: No solution found for dlt==9.9.9\n")
+            with self.assertRaises(sync_workspace_deps.SyncError) as ctx:
+                sync_workspace_deps.fetch_workspace_deps("9.9.9")
+        self.assertIn("No solution found", str(ctx.exception))
+
+    def test_missing_uv_raises(self):
+        with patch.object(sync_workspace_deps.shutil, "which", return_value=None):
+            with self.assertRaises(sync_workspace_deps.SyncError):
+                sync_workspace_deps.fetch_workspace_deps("1.32.0")
+
+    def test_timeout_raises(self):
+        with (
+            patch.object(sync_workspace_deps.shutil, "which", return_value="/usr/bin/uv"),
+            patch.object(sync_workspace_deps.subprocess, "run", side_effect=subprocess.TimeoutExpired("uv", 1)),
+        ):
+            with self.assertRaises(sync_workspace_deps.SyncError):
+                sync_workspace_deps.fetch_workspace_deps("1.32.0")
 
 
 class MergeSpecsTest(unittest.TestCase):
