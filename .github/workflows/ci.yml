@@ -113,5 +113,5 @@ jobs:
       - name: Verify bundled workspace lockfile is in sync with its pyproject.toml
         run: make scaffold-lock-check
 
-      - name: Verify bundled workspace deps match dlt's WORKSPACE_DEPS
+      - name: Verify bundled workspace deps match dlt's workspace_deps()
         run: make scaffold-deps-check

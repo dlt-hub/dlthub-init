@@ -145,10 +145,10 @@ jobs:
           run "make dev" make dev
           run "make lock-upgrade" make lock-upgrade
           run "make scaffold-lock-upgrade" make scaffold-lock-upgrade
-          # expected to fail after a dlt release that changed WORKSPACE_DEPS, so not run
+          # expected to fail after a dlt release that changed workspace_deps(), so not run
           # through `run`
           if make scaffold-deps-check; then
-            echo "scaffold deps already match dlt's WORKSPACE_DEPS"
+            echo "scaffold deps already match dlt's workspace_deps()"
           else
             run "make scaffold-deps-sync" make scaffold-deps-sync
             run "make scaffold-lock-upgrade (after the deps sync)" make scaffold-lock-upgrade
@@ -240,7 +240,7 @@ jobs:
             echo '## Acceptance criteria'
             echo
             echo '- [ ] Both `uv.lock` files resolve the latest versions their `pyproject.toml` constraints allow: `make lock-check` and `make scaffold-lock-check` pass.'
-            echo '- [ ] The bundled workspace dependencies match dlt'"'"'s `WORKSPACE_DEPS`: `make scaffold-deps-check` passes.'
+            echo '- [ ] The bundled workspace dependencies match dlt'"'"'s `workspace_deps()`: `make scaffold-deps-check` passes.'
             echo '- [ ] `skills/` matches what `scripts/generate_skills.py` produces at its pinned ref: `make check-skills` passes.'
             echo '- [ ] `CHANGELOG.md` carries a `### Changed` block under `## [Unreleased]` naming every direct dependency of the bundled workspace whose version moved, with its old and new version.'
             echo '- [ ] `make ci` passes.'
