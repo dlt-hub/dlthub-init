@@ -44,7 +44,7 @@ on:
             && (startsWith(github.event.comment.body, '/retry')
                 || startsWith(github.event.comment.body, '/agent review'))
             && contains(github.event.issue.labels.*.name, 'agent:authored'))
-      uses: dlt-hub/engineering-agent-loop/.github/actions/profile@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+      uses: dlt-hub/engineering-agent-loop/.github/actions/profile@27ad2f94af4552c4d7f682d8f59b03971d6c913d
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -63,7 +63,7 @@ on:
     - name: Ask whether this pull request is one this loop owns
       id: scope
       if: steps.profile.outcome == 'success' && steps.profile.outputs.profile != ''
-      uses: dlt-hub/engineering-agent-loop/.github/actions/scope-gate@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+      uses: dlt-hub/engineering-agent-loop/.github/actions/scope-gate@27ad2f94af4552c4d7f682d8f59b03971d6c913d
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         profile: ${{ steps.profile.outputs.profile }}
@@ -87,14 +87,15 @@ on:
         && steps.profile.outputs.profile != ''
         && steps.owned.outcome != 'failure'
       continue-on-error: true
-      uses: dlt-hub/engineering-agent-loop/.github/actions/rerun-checks@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+      uses: dlt-hub/engineering-agent-loop/.github/actions/rerun-checks@27ad2f94af4552c4d7f682d8f59b03971d6c913d
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         profile: ${{ steps.profile.outputs.profile }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
 
-    # last, so a comment the gates above stopped stays silent. An outside collaborator holds
-    # push access here and is still refused, as is every bot, which reports `NONE`.
+    # last, so a comment the gates above stopped stays silent. Write access is read from the
+    # API. The comment's `author_association` reports a different value to each reader, and
+    # calls an organisation member whose membership is private a collaborator.
     #
     # no `id:`: the compiler turns one into a job output, and activation must not be gated
     # on a failed reaction
@@ -104,15 +105,22 @@ on:
         && steps.profile.outcome == 'success'
         && steps.profile.outputs.profile != ''
         && steps.owned.outcome != 'failure'
-        && contains(fromJSON('["OWNER", "MEMBER"]'), github.event.comment.author_association)
       continue-on-error: true
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # this job has no checkout, so `gh` cannot resolve the repository without it
         GH_REPO: ${{ github.repository }}
         COMMENT: ${{ github.event.comment.id }}
+        ACTOR: ${{ github.event.comment.user.login }}
       run: |
         set -euo pipefail
+        PERMISSION=$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission \
+          || echo none)
+        case "$PERMISSION" in
+          admin|maintain|write) ;;
+          *) echo "::notice::$ACTOR has $PERMISSION access here; this comment is not acknowledged."
+             exit 0 ;;
+        esac
         gh api --silent -X POST "repos/$GH_REPO/issues/comments/$COMMENT/reactions" \
           -f content=eyes
 
@@ -144,7 +152,7 @@ if: >-
   && needs.pre_activation.outputs.owned_result != 'failure'
 
 imports:
-  - dlt-hub/engineering-agent-loop/workflows/stages/review.md@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+  - dlt-hub/engineering-agent-loop/workflows/stages/review.md@27ad2f94af4552c4d7f682d8f59b03971d6c913d
 
 permissions:
   actions: read
@@ -157,13 +165,12 @@ timeout-minutes: 25
 
 pre-agent-steps:
   - name: Gate a comment before the agent starts
-    uses: dlt-hub/engineering-agent-loop/.github/actions/retry-gate@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+    uses: dlt-hub/engineering-agent-loop/.github/actions/retry-gate@27ad2f94af4552c4d7f682d8f59b03971d6c913d
     with:
       pr: ${{ github.event.issue.number || inputs.pr_number }}
       github-token: ${{ secrets.GITHUB_TOKEN }}
       # comment text reaches a script as an argument, never as shell
       comment-body: ${{ github.event.comment.body }}
-      comment-association: ${{ github.event.comment.author_association }}
       comment-actor: ${{ github.event.comment.user.login }}
 
   - name: Check out the pull request branch
@@ -177,21 +184,20 @@ pre-agent-steps:
 
   - name: Resolve the profile from the pull request
     id: profile
-    uses: dlt-hub/engineering-agent-loop/.github/actions/profile@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+    uses: dlt-hub/engineering-agent-loop/.github/actions/profile@27ad2f94af4552c4d7f682d8f59b03971d6c913d
     with:
       pr: ${{ github.event.issue.number || inputs.pr_number }}
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   - name: Assemble the review brief
     id: brief
-    uses: dlt-hub/engineering-agent-loop/.github/actions/review-brief@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+    uses: dlt-hub/engineering-agent-loop/.github/actions/review-brief@27ad2f94af4552c4d7f682d8f59b03971d6c913d
     with:
       pr: ${{ github.event.issue.number || inputs.pr_number }}
       profile: ${{ steps.profile.outputs.profile }}
       github-token: ${{ secrets.GITHUB_TOKEN }}
       # acted on by this run, so it comes off the event rather than the state comment
       comment-body: ${{ github.event.comment.body }}
-      comment-association: ${{ github.event.comment.author_association }}
       comment-actor: ${{ github.event.comment.user.login }}
 
   - name: Hand the check rollup to the verdict
@@ -253,7 +259,7 @@ safe-outputs:
   steps:
     # the run's own proxy is denied by design; the notice otherwise asks for it to be allowed
     - name: Drop the api-proxy's own denials from the firewall notice
-      uses: dlt-hub/engineering-agent-loop/.github/actions/firewall-notice@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+      uses: dlt-hub/engineering-agent-loop/.github/actions/firewall-notice@27ad2f94af4552c4d7f682d8f59b03971d6c913d
 
     # a missing rollup reads as a hand-over, so this may fail without failing the job
     - name: Take the check rollup from the agent job
@@ -292,19 +298,19 @@ safe-outputs:
 
     - name: Resolve the profile from the pull request
       id: profile
-      uses: dlt-hub/engineering-agent-loop/.github/actions/profile@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+      uses: dlt-hub/engineering-agent-loop/.github/actions/profile@27ad2f94af4552c4d7f682d8f59b03971d6c913d
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         github-token: ${{ steps.verdict-app-token.outputs.token }}
 
     - name: Gate the repair patch against the target profile
       if: contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch')
-      uses: dlt-hub/engineering-agent-loop/.github/actions/path-gate@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+      uses: dlt-hub/engineering-agent-loop/.github/actions/path-gate@27ad2f94af4552c4d7f682d8f59b03971d6c913d
       with:
         profile: ${{ steps.profile.outputs.profile }}
 
     - name: Apply the verdict
-      uses: dlt-hub/engineering-agent-loop/.github/actions/verdict@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+      uses: dlt-hub/engineering-agent-loop/.github/actions/verdict@27ad2f94af4552c4d7f682d8f59b03971d6c913d
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         bot: ${{ steps.verdict-app-token.outputs.app-slug }}[bot]
@@ -312,7 +318,6 @@ safe-outputs:
         profile: ${{ steps.profile.outputs.profile }}
         ref: ${{ github.event.repository.default_branch }}
         comment-body: ${{ github.event.comment.body }}
-        comment-association: ${{ github.event.comment.author_association }}
         comment-actor: ${{ github.event.comment.user.login }}
         # anything but `true` means the scan dropped the patch
         detection-success: ${{ needs.detection.outputs.detection_success }}
@@ -328,7 +333,7 @@ safe-outputs:
       if: >-
         github.event_name != 'issue_comment'
         || startsWith(github.event.comment.body, '/agent review')
-      uses: dlt-hub/engineering-agent-loop/.github/actions/apply-risk@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+      uses: dlt-hub/engineering-agent-loop/.github/actions/apply-risk@27ad2f94af4552c4d7f682d8f59b03971d6c913d
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         profile: ${{ steps.profile.outputs.profile }}
@@ -338,7 +343,7 @@ safe-outputs:
       if: >-
         github.event_name != 'issue_comment'
         || startsWith(github.event.comment.body, '/agent review')
-      uses: dlt-hub/engineering-agent-loop/.github/actions/nominate-reviewer@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+      uses: dlt-hub/engineering-agent-loop/.github/actions/nominate-reviewer@27ad2f94af4552c4d7f682d8f59b03971d6c913d
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         bot: ${{ steps.verdict-app-token.outputs.app-slug }}[bot]
@@ -349,7 +354,7 @@ safe-outputs:
     # incomplete result is this workflow's free pass
     - name: Say on the pull request that this run did not finish
       if: needs.agent.result == 'failure'
-      uses: dlt-hub/engineering-agent-loop/.github/actions/failure-notice@69ae64dc27f4375169ee709a7c874bacb1bdf3f7
+      uses: dlt-hub/engineering-agent-loop/.github/actions/failure-notice@27ad2f94af4552c4d7f682d8f59b03971d6c913d
       with:
         number: ${{ github.event.issue.number || inputs.pr_number }}
         stage: review

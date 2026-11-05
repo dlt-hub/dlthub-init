@@ -9,6 +9,8 @@ on:
 
 permissions:
   actions: write
+  # read the commenter's permission on this repository
+  contents: read
   # a review comment's reactions endpoint sits under `pulls`
   pull-requests: write
 
@@ -16,25 +18,43 @@ jobs:
   # one job, because each job here leaves a check run on the head
   start-feedback:
     runs-on: ubuntu-latest
-    # write access is tested here and not only in the pass: on a public repository a comment
-    # from anyone is a run
     if: >-
       contains(github.event.pull_request.labels.*.name, 'agent:authored')
       && (github.event_name != 'pull_request_review'
           || (github.event.review.state == 'changes_requested'
-              && github.event.review.user.type != 'Bot'
-              && contains(fromJSON('["OWNER", "MEMBER"]'),
-                          github.event.review.author_association)))
+              && github.event.review.user.type != 'Bot'))
       && (github.event_name != 'pull_request_review_comment'
-          || (github.event.comment.user.type != 'Bot'
-              && contains(fromJSON('["OWNER", "MEMBER"]'),
-                          github.event.comment.author_association)))
+          || github.event.comment.user.type != 'Bot')
     steps:
+      # write access is tested here and not only in the pass: on a public repository a comment
+      # from anyone is a run. It is an API read rather than the event's `author_association`,
+      # which reports a different value to each reader and calls an organisation member whose
+      # membership is private a collaborator.
+      - name: Read what the reviewer may ask for
+        id: access
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # this job has no checkout, so `gh` cannot resolve the repository without it
+          GH_REPO: ${{ github.repository }}
+          ACTOR: >-
+            ${{ github.event_name == 'pull_request_review'
+                && github.event.review.user.login
+                || github.event.comment.user.login }}
+        run: |
+          set -euo pipefail
+          PERMISSION=$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission \
+            || echo none)
+          case "$PERMISSION" in
+            admin|maintain|write) echo "write=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "write=false" >> "$GITHUB_OUTPUT"
+               echo "::notice::$ACTOR has $PERMISSION access here, so this starts no pass." ;;
+          esac
+
       # a review submission has no reactions endpoint, so only the comment channel reacts
       - name: Acknowledge the comment this pass was started by
         if: >-
           github.event_name == 'pull_request_review_comment'
-          && contains(fromJSON('["OWNER", "MEMBER"]'), github.event.comment.author_association)
+          && steps.access.outputs.write == 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -46,9 +66,9 @@ jobs:
             -f content=eyes
 
       - name: Start review on the pull request a reviewer asked about
+        if: steps.access.outputs.write == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # this job has no checkout, so `gh` cannot resolve the repository without it
           GH_REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           REF: ${{ github.event.repository.default_branch }}

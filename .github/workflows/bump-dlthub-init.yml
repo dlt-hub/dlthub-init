@@ -33,6 +33,8 @@ concurrency:
 
 env:
   SCAFFOLD: src/dlthub_init/scaffolds/minimal_workspace
+  # read by the step that commits and by the step that pushes
+  BRANCH: chore/bump-scaffold-${{ github.run_id }}
   # everything else in the lock moves as a transitive of these three
   WATCHED: dlt dlthub dlthub-client
 
@@ -145,8 +147,8 @@ jobs:
           run "make dev" make dev
           run "make lock-upgrade" make lock-upgrade
           run "make scaffold-lock-upgrade" make scaffold-lock-upgrade
-          # expected to fail after a dlt release that changed workspace_deps(), so not run
-          # through `run`
+          # expected to fail after a dlt release that changed `workspace_deps()`, so not
+          # run through `run`
           if make scaffold-deps-check; then
             echo "scaffold deps already match dlt's workspace_deps()"
           else
@@ -156,7 +158,9 @@ jobs:
           fi
           run "make scaffold-lock-check" make scaffold-lock-check
           run "make update-skills" make update-skills
-          run "make check-skills" make check-skills
+          # `make check-skills` is not run here, and nor is any other target that reads
+          # `git status`: the recipe has just rewritten the files those targets compare
+          # against the index. `make ci` runs them, after the commit below
 
       - name: Write the changelog entry
         id: entry
@@ -200,6 +204,23 @@ jobs:
           cat /tmp/bump-entry.md
           echo "wrote=true" >> "$GITHUB_OUTPUT"
 
+      # before `make ci`, because `check-skills` inside it is `git status --porcelain --
+      # skills` and the recipe has just regenerated that directory. Nothing is pushed here,
+      # so a red `make ci` still leaves the target as it was
+      - name: Commit the bump
+        if: steps.entry.outputs.wrote == 'true'
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "committing the bump" > /tmp/bump-failed-step
+          git config user.name  "${APP_SLUG}[bot]"
+          git config user.email "${APP_SLUG}[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add -A
+          git commit -q -m 'chore: refresh the bundled workspace lock'
+          rm -f /tmp/bump-failed-step
+
       - name: make ci
         if: steps.entry.outputs.wrote == 'true'
         run: |
@@ -224,10 +245,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           BEHIND: ${{ steps.decide.outputs.behind }}
           BASE: ${{ github.event.repository.default_branch }}
-          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: |
           set -euo pipefail
-          branch="chore/bump-scaffold-${GITHUB_RUN_ID}"
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
           {
@@ -260,12 +279,7 @@ jobs:
             --body-file /tmp/bump-issue.md | sed 's#.*/##')
           echo "::notice::opened issue #${issue}"
 
-          git config user.name  "${APP_SLUG}[bot]"
-          git config user.email "${APP_SLUG}[bot]@users.noreply.github.com"
-          git switch -c "$branch"
-          git add -A
-          git commit -q -m 'chore: refresh the bundled workspace lock'
-          git push -q origin "$branch"
+          git push -q origin "$BRANCH"
 
           {
             echo "Closes #${issue}"
@@ -286,7 +300,7 @@ jobs:
             echo "\`${SCAFFOLD}/pyproject.toml\` is what decides what they may resolve to."
           } > /tmp/bump-pr.md
 
-          pr=$(gh pr create --base "$BASE" --head "$branch" \
+          pr=$(gh pr create --base "$BASE" --head "$BRANCH" \
             --title 'chore: refresh the bundled workspace lock' \
             --label agent:authored \
             --body-file /tmp/bump-pr.md | sed 's#.*/##')
