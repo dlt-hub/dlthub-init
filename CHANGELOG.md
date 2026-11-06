@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- Python 3.10 support. Both `dlthub-init` and the scaffolded workspace now require Python 3.11 or newer: 3.10 reached end of life in October 2026, `dlthub-client` 0.28.8 already dropped it, and the scaffold pins 3.13 via `.python-version`. The `tomli` fallback dependency is gone with it.
+
+### Changed
+- Capped `beaupy` below 5 so a lock refresh cannot take a major version silently.
+
 ### Fixed
 - `make scaffold-deps-sync` works with dlt 1.32.0, where `WORKSPACE_DEPS` became `workspace_deps()` (#43).
 

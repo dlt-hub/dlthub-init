@@ -8,12 +8,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCAFFOLD_DIR = REPO_ROOT / "src" / "dlthub_init" / "scaffolds" / "minimal_workspace"

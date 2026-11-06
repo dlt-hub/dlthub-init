@@ -6,9 +6,9 @@ import atexit
 import logging
 import os
 import secrets
-import sys
 import tempfile
 import time
+import tomllib
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,11 +17,6 @@ from typing import Any, Literal
 from . import strings
 from .config import POSTHOG_HOST, VERSION
 from .display import console
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 try:
     from ._telemetry_key import POSTHOG_PROJECT_KEY  # type: ignore[import-untyped]
