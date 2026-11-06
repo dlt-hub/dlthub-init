@@ -143,8 +143,12 @@ function insertEntry(changelog, bullets) {
   const end = nextHeading === -1 ? lines.length : nextHeading;
   const changed = lines.findIndex((l, i) => i > at && i < end && /^### Changed\s*$/.test(l));
   if (changed !== -1) {
+    // the block ends at the next `###`, not at the next `##`: `[Unreleased]` carries
+    // `### Fixed` and `### Removed` beside it and the bullets belong above them
+    const after = lines.findIndex((l, i) => i > changed && i < end && /^### /.test(l));
+    const blockEnd = after === -1 ? end : after;
     let last = changed;
-    for (let i = changed + 1; i < end; i += 1) if (lines[i].trim()) last = i;
+    for (let i = changed + 1; i < blockEnd; i += 1) if (lines[i].trim()) last = i;
     lines.splice(last + 1, 0, ...bullets);
     return lines.join('\n');
   }
