@@ -300,11 +300,25 @@ jobs:
             echo "\`${SCAFFOLD}/pyproject.toml\` is what decides what they may resolve to."
           } > /tmp/bump-pr.md
 
+          # the tier and the reviewer request are normally the review pass's, and that pass
+          # cannot run in a public repository. the logins are a literal because a workflow
+          # reads no profile, and a test holds them equal to the profile's `low` tier
           pr=$(gh pr create --base "$BASE" --head "$BRANCH" \
             --title 'chore: refresh the bundled workspace lock' \
-            --label agent:authored \
+            --label agent:authored --label risk:low \
+            --reviewer burnash,sh-rp,anuunchin,rudolfix \
             --body-file /tmp/bump-pr.md | sed 's#.*/##')
           echo "::notice::opened pull request #${pr}"
+
+          # a request naming an account without access here is accepted and requests nobody,
+          # so it is read back. an empty one is a warning: the pull request is already open
+          requested=$(gh pr view "$pr" --json reviewRequests \
+            --jq '[.reviewRequests[] | .login // .slug] | join(", ")')
+          if [ -z "$requested" ]; then
+            echo "::warning::no reviewer is requested on #${pr}. The logins in this workflow may not have access here."
+          else
+            echo "::notice::reviewers requested on #${pr}: ${requested}"
+          fi
 
           gh workflow run review.lock.yml --ref "$BASE" -f pr_number="$pr"
 
