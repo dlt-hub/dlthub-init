@@ -44,7 +44,7 @@ on:
             && (startsWith(github.event.comment.body, '/retry')
                 || startsWith(github.event.comment.body, '/agent review'))
             && contains(github.event.issue.labels.*.name, 'agent:authored'))
-      uses: dlt-hub/engineering-agent-loop/.github/actions/profile@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+      uses: dlt-hub/engineering-agent-loop/.github/actions/profile@7ac9ecc89c433ee57a4fc6bacabb408273bde876
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -63,7 +63,7 @@ on:
     - name: Ask whether this pull request is one this loop owns
       id: scope
       if: steps.profile.outcome == 'success' && steps.profile.outputs.profile != ''
-      uses: dlt-hub/engineering-agent-loop/.github/actions/scope-gate@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+      uses: dlt-hub/engineering-agent-loop/.github/actions/scope-gate@7ac9ecc89c433ee57a4fc6bacabb408273bde876
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         profile: ${{ steps.profile.outputs.profile }}
@@ -87,7 +87,7 @@ on:
         && steps.profile.outputs.profile != ''
         && steps.owned.outcome != 'failure'
       continue-on-error: true
-      uses: dlt-hub/engineering-agent-loop/.github/actions/rerun-checks@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+      uses: dlt-hub/engineering-agent-loop/.github/actions/rerun-checks@7ac9ecc89c433ee57a4fc6bacabb408273bde876
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         profile: ${{ steps.profile.outputs.profile }}
@@ -152,7 +152,7 @@ if: >-
   && needs.pre_activation.outputs.owned_result != 'failure'
 
 imports:
-  - dlt-hub/engineering-agent-loop/workflows/stages/review.md@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+  - dlt-hub/engineering-agent-loop/workflows/stages/review.md@7ac9ecc89c433ee57a4fc6bacabb408273bde876
 
 permissions:
   actions: read
@@ -165,7 +165,7 @@ timeout-minutes: 25
 
 pre-agent-steps:
   - name: Gate a comment before the agent starts
-    uses: dlt-hub/engineering-agent-loop/.github/actions/retry-gate@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+    uses: dlt-hub/engineering-agent-loop/.github/actions/retry-gate@7ac9ecc89c433ee57a4fc6bacabb408273bde876
     with:
       pr: ${{ github.event.issue.number || inputs.pr_number }}
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -184,14 +184,14 @@ pre-agent-steps:
 
   - name: Resolve the profile from the pull request
     id: profile
-    uses: dlt-hub/engineering-agent-loop/.github/actions/profile@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+    uses: dlt-hub/engineering-agent-loop/.github/actions/profile@7ac9ecc89c433ee57a4fc6bacabb408273bde876
     with:
       pr: ${{ github.event.issue.number || inputs.pr_number }}
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   - name: Assemble the review brief
     id: brief
-    uses: dlt-hub/engineering-agent-loop/.github/actions/review-brief@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+    uses: dlt-hub/engineering-agent-loop/.github/actions/review-brief@7ac9ecc89c433ee57a4fc6bacabb408273bde876
     with:
       pr: ${{ github.event.issue.number || inputs.pr_number }}
       profile: ${{ steps.profile.outputs.profile }}
@@ -259,7 +259,7 @@ safe-outputs:
   steps:
     # the run's own proxy is denied by design; the notice otherwise asks for it to be allowed
     - name: Drop the api-proxy's own denials from the firewall notice
-      uses: dlt-hub/engineering-agent-loop/.github/actions/firewall-notice@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+      uses: dlt-hub/engineering-agent-loop/.github/actions/firewall-notice@7ac9ecc89c433ee57a4fc6bacabb408273bde876
 
     # a missing rollup reads as a hand-over, so this may fail without failing the job
     - name: Take the check rollup from the agent job
@@ -298,19 +298,19 @@ safe-outputs:
 
     - name: Resolve the profile from the pull request
       id: profile
-      uses: dlt-hub/engineering-agent-loop/.github/actions/profile@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+      uses: dlt-hub/engineering-agent-loop/.github/actions/profile@7ac9ecc89c433ee57a4fc6bacabb408273bde876
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         github-token: ${{ steps.verdict-app-token.outputs.token }}
 
     - name: Gate the repair patch against the target profile
       if: contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch')
-      uses: dlt-hub/engineering-agent-loop/.github/actions/path-gate@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+      uses: dlt-hub/engineering-agent-loop/.github/actions/path-gate@7ac9ecc89c433ee57a4fc6bacabb408273bde876
       with:
         profile: ${{ steps.profile.outputs.profile }}
 
     - name: Apply the verdict
-      uses: dlt-hub/engineering-agent-loop/.github/actions/verdict@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+      uses: dlt-hub/engineering-agent-loop/.github/actions/verdict@7ac9ecc89c433ee57a4fc6bacabb408273bde876
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         bot: ${{ steps.verdict-app-token.outputs.app-slug }}[bot]
@@ -333,7 +333,7 @@ safe-outputs:
       if: >-
         github.event_name != 'issue_comment'
         || startsWith(github.event.comment.body, '/agent review')
-      uses: dlt-hub/engineering-agent-loop/.github/actions/apply-risk@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+      uses: dlt-hub/engineering-agent-loop/.github/actions/apply-risk@7ac9ecc89c433ee57a4fc6bacabb408273bde876
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         profile: ${{ steps.profile.outputs.profile }}
@@ -343,7 +343,7 @@ safe-outputs:
       if: >-
         github.event_name != 'issue_comment'
         || startsWith(github.event.comment.body, '/agent review')
-      uses: dlt-hub/engineering-agent-loop/.github/actions/nominate-reviewer@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+      uses: dlt-hub/engineering-agent-loop/.github/actions/nominate-reviewer@7ac9ecc89c433ee57a4fc6bacabb408273bde876
       with:
         pr: ${{ github.event.issue.number || inputs.pr_number }}
         bot: ${{ steps.verdict-app-token.outputs.app-slug }}[bot]
@@ -354,7 +354,7 @@ safe-outputs:
     # incomplete result is this workflow's free pass
     - name: Say on the pull request that this run did not finish
       if: needs.agent.result == 'failure'
-      uses: dlt-hub/engineering-agent-loop/.github/actions/failure-notice@27ad2f94af4552c4d7f682d8f59b03971d6c913d
+      uses: dlt-hub/engineering-agent-loop/.github/actions/failure-notice@7ac9ecc89c433ee57a4fc6bacabb408273bde876
       with:
         number: ${{ github.event.issue.number || inputs.pr_number }}
         stage: review
