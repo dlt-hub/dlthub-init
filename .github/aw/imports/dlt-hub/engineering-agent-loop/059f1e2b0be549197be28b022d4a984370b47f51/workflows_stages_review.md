@@ -29,7 +29,7 @@ safe-outputs:
   # this a GitHub Pages link in a body is rewritten to `(domain/redacted)`. Redaction only:
   # the firewall's own allowlist is untouched
   allowed-domains: [dlt-hub.github.io]
-  # the dlt-hub org forbids the Actions identity from writing pull requests.
+  # a pull request is written as the loop's App rather than as the Actions identity.
   github-app:
     client-id: ${{ vars.AGENT_LOOP_APP_CLIENT_ID }}
     private-key: ${{ secrets.AGENT_LOOP_APP_PRIVATE_KEY }}
@@ -40,11 +40,6 @@ safe-outputs:
     target: "${{ github.event.issue.number || inputs.pr_number }}"
     # the pre-flight needs `administration: read`, which the App lacks; protection holds at push.
     check-branch-protection: false
-    # inert today: this handler implements `deny` and `fallback-to-issue` and nothing for
-    # `request-review`. Set so a repair pass is not refused an allowed path if that closes.
-    # Trailing slash, as on dispatch
-    protected-files:
-      exclude: [".integration_tests/"]
 
   # the brief carries the repository's own rules for a body only on a pass that starts a
   # model, so the commonest run still stops before one and costs nothing
