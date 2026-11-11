@@ -1,6 +1,0 @@
-# Placed here by the engineering agent loop, and it governs this directory only.
-#
-# A `*.lock.yml` is generated from the workflow file of the same name. Marking it generated
-# collapses it in a pull request diff and keeps it out of this repository's language
-# statistics. It stays tracked and `git grep` still finds it.
-*.lock.yml  linguist-generated=true

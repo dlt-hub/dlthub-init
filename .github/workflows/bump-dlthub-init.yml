@@ -320,7 +320,11 @@ jobs:
             echo "::notice::reviewers requested on #${pr}: ${requested}"
           fi
 
-          gh workflow run review.lock.yml --ref "$BASE" -f pr_number="$pr"
+          # no reviewing pass is dispatched here, and that is #480. This repository is public,
+          # so it receives the parts of the loop that need no agent and none of the workflow
+          # files a pass runs from: a private repository's actions resolve for private
+          # consumers only, so such a run dies before its first step (#461). The reviewer
+          # requested above is who reads this. Restore the dispatch when a stage can run here.
 
       # stops the next hourly run too: the decide step reads an open issue as a bump in
       # flight
