@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Synced the bundled minimal workspace dependencies with dlt's `workspace_deps()`: changed `duckdb` to `duckdb>=0.9,<2`.
 - Refreshed the root `uv.lock` to the latest within-constraint versions (`beaupy` 3.12.0 → 4.0.1, `mypy` 2.4.0 → 2.4.1, `posthog` 7.64.1 → 7.84.3, `pytest` 9.1.1 → 9.2.0), plus 4 transitive updates, dropped `emoji`.
 - Refreshed the bundled skills to workbench `0c2b3a3`.
+- Refreshed the bundled minimal workspace `uv.lock` to the latest within-constraint versions (`fastmcp` 4.1.6 → 4.1.8), plus 12 transitive updates.
+- Refreshed the root `uv.lock` to the latest within-constraint versions (`posthog` 7.84.3 → 7.87.0), plus 1 transitive update.
+- Refreshed the bundled skills to workbench `d6d3cb1`.
 
 ### Fixed
 - `make scaffold-deps-sync` works with dlt 1.32.0, where `WORKSPACE_DEPS` became `workspace_deps()` (#43).
