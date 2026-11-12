@@ -5,9 +5,10 @@
 // version heading, and `--notes` reads that heading's section back out as the body of the
 // GitHub release.
 //
-// `--cut` is the inverse of `insertEntry` in `bump-changelog-entry.cjs`. That one appends a
-// bullet to `[Unreleased]`; this one draws a line under everything there and leaves the
-// heading empty for the next bump.
+// `--cut` is the inverse of `insertEntry` in `bump-changelog-entry.cjs`. That one keeps
+// `[Unreleased]` holding one bullet per thing a bump changes; this one draws a line under
+// everything there and leaves the heading empty for the next bump. Emptying it is also what
+// makes the next bump's entry start from this release rather than restate it.
 
 const fs = require('node:fs');
 

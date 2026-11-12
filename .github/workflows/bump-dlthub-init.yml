@@ -46,13 +46,16 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ vars.AGENT_LOOP_APP_CLIENT_ID }}
-          private-key: ${{ secrets.AGENT_LOOP_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.AGENT_LOOP_PUBLIC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AGENT_LOOP_PUBLIC_APP_PRIVATE_KEY }}
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           token: ${{ steps.app-token.outputs.token }}
+          # the changelog entry is written against the last release tag, and a shallow clone
+          # carries no tag to describe
+          fetch-depth: 0
 
       - name: Is the bundled lock behind a release
         id: decide
@@ -107,17 +110,44 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
 
-      # `git stash` would do the same and would also hide a failure
-      - name: Keep the locks and the scaffold deps as they are now
+      # The entry is written against the last release, not against the tip this run is about
+      # to overwrite, so it states the whole unreleased delta and replaces what the bump
+      # before it wrote. Written against the tip, a second bump between two releases appends
+      # a second `Refreshed ...` line describing the same packages a version later.
+      #
+      # A branch with no release tag behind it, and a tag predating one of these four files,
+      # both fall back to the tip. All four or none: two baselines in one entry read as
+      # packages arriving and going.
+      - name: Keep the state the entry is written against
+        id: base
         if: steps.decide.outputs.bump == 'true'
         run: |
           set -euo pipefail
-          mkdir -p /tmp/bump-before
-          cp uv.lock /tmp/bump-before/root.uv.lock
-          cp "${SCAFFOLD}/uv.lock" /tmp/bump-before/scaffold.uv.lock
-          cp "${SCAFFOLD}/pyproject.toml" /tmp/bump-before/scaffold.pyproject.toml
-          sed -n 's/^WORKBENCH_REF_SHORT = "\(.*\)"$/\1/p' scripts/generate_skills.py \
-            > /tmp/bump-before/workbench-ref
+          mkdir -p /tmp/bump-base /tmp/bump-tag
+
+          # `git stash` would do the same for the tip and would also hide a failure
+          cp uv.lock /tmp/bump-base/root.uv.lock
+          cp "${SCAFFOLD}/uv.lock" /tmp/bump-base/scaffold.uv.lock
+          cp "${SCAFFOLD}/pyproject.toml" /tmp/bump-base/scaffold.pyproject.toml
+          cp scripts/generate_skills.py /tmp/bump-base/generate_skills.py
+          against="this branch's tip"
+
+          tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
+          if [ -z "$tag" ]; then
+            echo "::warning::no release tag is reachable from this branch."
+          elif git show "${tag}:uv.lock" > /tmp/bump-tag/root.uv.lock \
+            && git show "${tag}:${SCAFFOLD}/uv.lock" > /tmp/bump-tag/scaffold.uv.lock \
+            && git show "${tag}:${SCAFFOLD}/pyproject.toml" > /tmp/bump-tag/scaffold.pyproject.toml \
+            && git show "${tag}:scripts/generate_skills.py" > /tmp/bump-tag/generate_skills.py
+          then
+            cp -r /tmp/bump-tag/. /tmp/bump-base/
+            against="$tag"
+          else
+            echo "::warning::${tag} does not carry every file the entry is written from."
+          fi
+
+          echo "::notice::the changelog entry is written against ${against}."
+          echo "against=${against}" >> "$GITHUB_OUTPUT"
 
       # one step, because a step's own name is not readable from a later one and the failure
       # report has to name the command that failed
@@ -178,24 +208,26 @@ jobs:
           printf '%s\n' "writing the changelog entry" > /tmp/bump-failed-step
           set +e
           node "${GITHUB_WORKSPACE}/.github/workflows/bump-changelog-entry.cjs" \
-            --scaffold-before /tmp/bump-before/scaffold.uv.lock \
+            --scaffold-before /tmp/bump-base/scaffold.uv.lock \
             --scaffold-after "${SCAFFOLD}/uv.lock" \
-            --root-before /tmp/bump-before/root.uv.lock \
+            --root-before /tmp/bump-base/root.uv.lock \
             --root-after uv.lock \
             --direct "${SCAFFOLD}/pyproject.toml" \
             --root-direct pyproject.toml \
-            --deps-before /tmp/bump-before/scaffold.pyproject.toml \
+            --deps-before /tmp/bump-base/scaffold.pyproject.toml \
             --deps-after "${SCAFFOLD}/pyproject.toml" \
-            --skills-before "$(cat /tmp/bump-before/workbench-ref)" \
+            --skills-before "$(sed -n 's/^WORKBENCH_REF_SHORT = "\(.*\)"$/\1/p' /tmp/bump-base/generate_skills.py)" \
             --skills-after "$(sed -n 's/^WORKBENCH_REF_SHORT = "\(.*\)"$/\1/p' scripts/generate_skills.py)" \
             --changelog CHANGELOG.md > /tmp/bump-entry.md
           code=$?
           set -e
 
-          # exit 1 is the script saying no package version moved, which a lock rewritten for
-          # its metadata alone can produce. A bump with nothing to say opens nothing
+          # exit 1 is the script saying this run adds nothing to `## [Unreleased]`: either no
+          # package version moved at all, or the entry it renders is the one the bump before
+          # it left there. A lock rewritten for its metadata alone produces both. A bump with
+          # nothing to say opens nothing
           if [ "$code" != "0" ]; then
-            echo "::warning::the recipe rewrote a lock but moved no package version, so there is no entry to write and no pull request to open."
+            echo "::warning::the recipe rewrote a lock and nothing it moved is new to \`## [Unreleased]\`, so there is no pull request to open."
             git checkout -- . && git clean -fdq
             echo "wrote=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -245,6 +277,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           BEHIND: ${{ steps.decide.outputs.behind }}
           BASE: ${{ github.event.repository.default_branch }}
+          AGAINST: ${{ steps.base.outputs.against }}
         run: |
           set -euo pipefail
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
@@ -261,7 +294,7 @@ jobs:
             echo '- [ ] Both `uv.lock` files resolve the latest versions their `pyproject.toml` constraints allow: `make lock-check` and `make scaffold-lock-check` pass.'
             echo '- [ ] The bundled workspace dependencies match dlt'"'"'s `workspace_deps()`: `make scaffold-deps-check` passes.'
             echo '- [ ] `skills/` matches what `scripts/generate_skills.py` produces at its pinned ref: `make check-skills` passes.'
-            echo '- [ ] `CHANGELOG.md` carries a `### Changed` block under `## [Unreleased]` naming every direct dependency of the bundled workspace whose version moved, with its old and new version.'
+            echo '- [ ] `CHANGELOG.md` carries a `### Changed` block under `## [Unreleased]` naming every direct dependency of the bundled workspace whose version moved since the last release, once each, with its old and new version.'
             echo '- [ ] `make ci` passes.'
             echo
             echo '## Scope'
@@ -289,6 +322,11 @@ jobs:
             echo '## What changed'
             echo
             cat /tmp/bump-entry.md
+            echo
+            echo "Everything unreleased, rather than only what this run moved. The entry is written"
+            echo "against ${AGAINST} and replaces the bullets an earlier bump left under"
+            echo '`## [Unreleased]`, so a version pair here may have moved in a bump that is already'
+            echo 'merged.'
             echo
             echo '## How to check it'
             echo
@@ -320,11 +358,12 @@ jobs:
             echo "::notice::reviewers requested on #${pr}: ${requested}"
           fi
 
-          # no reviewing pass is dispatched here, and that is #480. This repository is public,
-          # so it receives the parts of the loop that need no agent and none of the workflow
-          # files a pass runs from: a private repository's actions resolve for private
-          # consumers only, so such a run dies before its first step (#461). The reviewer
-          # requested above is who reads this. Restore the dispatch when a stage can run here.
+          # no reviewing pass is dispatched here. This repository is public, so it receives
+          # the parts of the loop that need no agent and none of the workflow files a pass
+          # runs from: the loop's own repository is private, GitHub shares a private
+          # repository's actions with private consumers only, and such a run dies before its
+          # first step. The reviewer requested above is who reads this. Restore the dispatch
+          # when a stage can run here.
 
       # stops the next hourly run too: the decide step reads an open issue as a bump in
       # flight
