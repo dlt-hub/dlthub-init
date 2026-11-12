@@ -1,8 +1,14 @@
 'use strict';
 
 // Installed by the engineering agent loop. Edit it in dlt-hub/engineering-agent-loop, not
-// here. Writes a dependency bump's changelog entry from the two `uv.lock` files before and
-// after the recipe ran, as a draft the reviewing pass then holds to the diff.
+// here. Writes a dependency bump's changelog entry from the two `uv.lock` files, as a draft
+// the reviewing pass then holds to the diff.
+//
+// The `--*-before` state the caller passes is the last release, not the tip the recipe just
+// overwrote, so the entry is the whole account of what is unreleased. That is what lets a
+// second bump before a release replace the bullets the bump before it wrote: both describe
+// the same span, one of them a bump out of date. Appending instead grew `[Unreleased]` a
+// second `Refreshed ...` line per run.
 
 const fs = require('node:fs');
 
@@ -86,13 +92,32 @@ function directSpecs(text) {
 
 const versions = (list) => list.map((p) => `\`${p.name}\` ${p.from} → ${p.to}`);
 
+// How each of the four bullets opens. A second bump finds the first one's lines by these, so
+// rewording one here is what rewords it everywhere, and a line a person wrote is left alone
+// because it opens with something else
+const LEADS = {
+  scaffold: 'Refreshed the bundled minimal workspace `uv.lock` to the latest'
+    + ' within-constraint versions',
+  root: 'Refreshed the root `uv.lock` to the latest within-constraint versions',
+  deps: "Synced the bundled minimal workspace dependencies with dlt's `workspace_deps()`",
+  skills: 'Refreshed the bundled skills to workbench',
+};
+
+/** Whether a changelog line is a bullet an earlier run of this script wrote. */
+const isOwnBullet = (line) => Object.values(LEADS).some((lead) => line.startsWith(`- ${lead}`));
+
+/** The `LEADS` keys a run was given both sides of, which are the bullets it may replace. */
+function askedAbout({ scaffold, root, deps, skills }) {
+  return Object.keys(LEADS).filter((kind) => ({ scaffold, root, deps, skills })[kind]);
+}
+
 // direct dependencies carry both versions and transitives are counted, which is the shape
 // of every released entry
-function lockBullet({ what, diff, direct }) {
+function lockBullet({ lead, diff, direct }) {
   const isDirect = (p) => direct.has(p.name);
   const named = diff.moved.filter(isDirect);
   const rest = diff.moved.length - named.length;
-  const parts = [`Refreshed ${what} to the latest within-constraint versions`];
+  const parts = [lead];
   if (named.length) parts.push(` (${versions(named).join(', ')})`);
   const tail = [];
   if (rest) tail.push(`${rest} transitive update${rest === 1 ? '' : 's'}`);
@@ -109,9 +134,7 @@ function lockBullet({ what, diff, direct }) {
 function renderEntry({ scaffold, root, direct, rootDirect = null, deps = null, skills = null }) {
   const bullets = [];
   if (scaffold && scaffold.moved.length + scaffold.added.length + scaffold.removed.length) {
-    bullets.push(lockBullet({
-      what: 'the bundled minimal workspace `uv.lock`', diff: scaffold, direct,
-    }));
+    bullets.push(lockBullet({ lead: LEADS.scaffold, diff: scaffold, direct }));
   }
   if (deps && deps.added.length + deps.removed.length + deps.raised.length) {
     const said = [];
@@ -120,21 +143,26 @@ function renderEntry({ scaffold, root, direct, rootDirect = null, deps = null, s
       said.push(`changed ${deps.raised.map((r) => `\`${r.name}\` to \`${r.to}\``).join(', ')}`);
     }
     if (deps.removed.length) said.push(`dropped ${deps.removed.map((n) => `\`${n}\``).join(', ')}`);
-    bullets.push("- Synced the bundled minimal workspace dependencies with dlt's "
-      + `\`workspace_deps()\`: ${said.join(', ')}.`);
+    bullets.push(`- ${LEADS.deps}: ${said.join(', ')}.`);
   }
   if (root && root.moved.length + root.added.length + root.removed.length) {
-    bullets.push(lockBullet({ what: 'the root `uv.lock`', diff: root, direct: rootDirect || direct }));
+    bullets.push(lockBullet({ lead: LEADS.root, diff: root, direct: rootDirect || direct }));
   }
   if (skills && skills.from !== skills.to) {
-    bullets.push(`- Refreshed the bundled skills to workbench \`${skills.to}\`.`);
+    bullets.push(`- ${LEADS.skills} \`${skills.to}\`.`);
   }
   return bullets;
 }
 
-// appended to an existing `### Changed` block, so a second bump opens no second heading.
-// Every released heading below is what the next release moves, and that is a person's act
-function insertEntry(changelog, bullets) {
+// Into the existing `### Changed` block under `[Unreleased]`, so a second bump opens no
+// second heading, and in place of the bullets an earlier bump left there: both state what is
+// unreleased and only the new ones are current. A line a person wrote stays where it is.
+// Every released heading below is what the next release moves, and that is a person's act.
+//
+// `replaces` is which of the four a run computed, so a bullet that came out empty is dropped
+// and one the caller was not asked about is left standing. The two look the same in
+// `bullets` and mean opposite things
+function insertEntry(changelog, bullets, replaces = Object.keys(LEADS)) {
   if (!bullets.length) return changelog;
   const lines = String(changelog).split('\n');
   const at = lines.findIndex((l) => /^## \[Unreleased\]/.test(l));
@@ -142,17 +170,22 @@ function insertEntry(changelog, bullets) {
   const nextHeading = lines.findIndex((l, i) => i > at && /^## /.test(l));
   const end = nextHeading === -1 ? lines.length : nextHeading;
   const changed = lines.findIndex((l, i) => i > at && i < end && /^### Changed\s*$/.test(l));
-  if (changed !== -1) {
-    // the block ends at the next `###`, not at the next `##`: `[Unreleased]` carries
-    // `### Fixed` and `### Removed` beside it and the bullets belong above them
-    const after = lines.findIndex((l, i) => i > changed && i < end && /^### /.test(l));
-    const blockEnd = after === -1 ? end : after;
-    let last = changed;
-    for (let i = changed + 1; i < blockEnd; i += 1) if (lines[i].trim()) last = i;
-    lines.splice(last + 1, 0, ...bullets);
+  if (changed === -1) {
+    lines.splice(at + 1, 0, '', '### Changed', ...bullets);
     return lines.join('\n');
   }
-  lines.splice(at + 1, 0, '', '### Changed', ...bullets);
+  // the block ends at the next `###`, not at the next `##`: `[Unreleased]` carries
+  // `### Fixed` and `### Removed` beside it and the bullets belong above them
+  const after = lines.findIndex((l, i) => i > changed && i < end && /^### /.test(l));
+  const blockEnd = after === -1 ? end : after;
+  const stale = replaces.map((kind) => `- ${LEADS[kind]}`);
+  const kept = lines.slice(changed + 1, blockEnd)
+    .filter((l) => !stale.some((lead) => l.startsWith(lead)));
+  while (kept.length && !kept[0].trim()) kept.shift();
+  while (kept.length && !kept[kept.length - 1].trim()) kept.pop();
+  // the trailing blank is the one separating this block from the `###` or `##` after it, and
+  // the file's own last newline where `[Unreleased]` is the only section
+  lines.splice(changed + 1, blockEnd - changed - 1, ...kept, ...bullets, '');
   return lines.join('\n');
 }
 
@@ -184,14 +217,15 @@ function main(argv, io = console) {
   const skillsFrom = value('--skills-before');
   const skillsTo = value('--skills-after');
 
-  const bullets = renderEntry({
+  const entry = {
     scaffold: lockDiff(value('--scaffold-before'), value('--scaffold-after')),
     root: lockDiff(value('--root-before'), value('--root-after')),
     direct,
     rootDirect: value('--root-direct') ? directNames(read(value('--root-direct'))) : null,
     deps,
     skills: skillsFrom && skillsTo ? { from: skillsFrom, to: skillsTo } : null,
-  });
+  };
+  const bullets = renderEntry(entry);
 
   if (!bullets.length) {
     io.error('bump-changelog-entry: nothing moved, so there is no entry to write');
@@ -200,7 +234,16 @@ function main(argv, io = console) {
 
   const changelog = value('--changelog');
   if (changelog) {
-    fs.writeFileSync(changelog, insertEntry(fs.readFileSync(changelog, 'utf8'), bullets));
+    const was = fs.readFileSync(changelog, 'utf8');
+    const now = insertEntry(was, bullets, askedAbout(entry));
+    // the bullets an earlier bump wrote, recomputed against the same release and come out
+    // the same: this run rewrote a lock without moving a version anybody reads
+    if (now === was) {
+      io.error('bump-changelog-entry: the entry is already under `## [Unreleased]`, so this'
+        + ' run has nothing new to say');
+      return 1;
+    }
+    fs.writeFileSync(changelog, now);
     io.error(`bump-changelog-entry: wrote ${bullets.length} bullet(s) into ${changelog}`);
   }
   io.log(bullets.join('\n'));
@@ -210,6 +253,6 @@ function main(argv, io = console) {
 if (require.main === module) process.exit(main(process.argv.slice(2)));
 
 module.exports = {
-  parseLock, normalise, diffLocks, directNames, directSpecs, lockBullet, renderEntry,
-  insertEntry, main,
+  LEADS, isOwnBullet, askedAbout, parseLock, normalise, diffLocks, directNames, directSpecs,
+  lockBullet, renderEntry, insertEntry, main,
 };
