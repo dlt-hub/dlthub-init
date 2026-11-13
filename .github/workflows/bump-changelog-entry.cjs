@@ -90,6 +90,21 @@ function directSpecs(text) {
   return directNames(text, new Map());
 }
 
+/**
+ * The skills a `skills/` directory holds, or null where the caller named no such directory.
+ *
+ * A skill is one directory: `.gitkeep` and anything else loose beside them is not one. Null
+ * rather than an empty list, because a baseline that is not there read as "no skills" reports
+ * every skill in the repository as one this bump added.
+ */
+function skillNames(dir) {
+  if (!dir || !fs.existsSync(dir)) return null;
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort((a, b) => a.localeCompare(b));
+}
+
 const versions = (list) => list.map((p) => `\`${p.name}\` ${p.from} → ${p.to}`);
 
 // How each of the four bullets opens. A second bump finds the first one's lines by these, so
@@ -118,6 +133,8 @@ function sentenceList(parts) {
 }
 
 const plural = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+
+const skillList = (names) => sentenceList(names.map((n) => `\`${n}\``));
 
 // Direct dependencies are named and transitives are counted, which is the shape of every
 // released entry. It applies to a package arriving and leaving as much as to one moving
@@ -170,8 +187,18 @@ function renderEntry({ scaffold, root, direct, rootDirect = null, deps = null, s
   if (root && root.moved.length + root.added.length + root.removed.length) {
     bullets.push(lockBullet({ lead: LEADS.root, diff: root, direct: rootDirect || direct }));
   }
+  // The generator rewrites `skills/` whole at each ref, so a moved ref can add or drop a whole
+  // skill that everybody running `uvx dlthub-init` then gets. A seven-character SHA says none
+  // of that. What changed inside a skill that was already there is a person's to describe, as
+  // it is in the released entries.
   if (skills && skills.from !== skills.to) {
-    bullets.push(`- ${LEADS.skills} \`${skills.to}\`.`);
+    const said = [];
+    if (skills.added && skills.added.length) said.push(`adding ${skillList(skills.added)}`);
+    if (skills.removed && skills.removed.length) {
+      said.push(`dropping ${skillList(skills.removed)}`);
+    }
+    const tail = said.length ? `, ${said.join(', ')}` : '';
+    bullets.push(`- ${LEADS.skills} \`${skills.to}\`${tail}.`);
   }
   return bullets;
 }
@@ -238,6 +265,18 @@ function main(argv, io = console) {
   }
   const skillsFrom = value('--skills-before');
   const skillsTo = value('--skills-after');
+  const skillDirs = [value('--skills-dir-before'), value('--skills-dir-after')];
+  const [wasSkills, nowSkills] = skillDirs.map(skillNames);
+  if (skillDirs.some(Boolean) && !(wasSkills && nowSkills)) {
+    io.error('bump-changelog-entry: a `skills/` directory the caller named is not there, so the'
+      + ' workbench bullet names the ref alone');
+  }
+  const skillDiff = wasSkills && nowSkills
+    ? {
+      added: nowSkills.filter((n) => !wasSkills.includes(n)),
+      removed: wasSkills.filter((n) => !nowSkills.includes(n)),
+    }
+    : { added: [], removed: [] };
 
   const entry = {
     scaffold: lockDiff(value('--scaffold-before'), value('--scaffold-after')),
@@ -245,7 +284,7 @@ function main(argv, io = console) {
     direct,
     rootDirect: value('--root-direct') ? directNames(read(value('--root-direct'))) : null,
     deps,
-    skills: skillsFrom && skillsTo ? { from: skillsFrom, to: skillsTo } : null,
+    skills: skillsFrom && skillsTo ? { from: skillsFrom, to: skillsTo, ...skillDiff } : null,
   };
   const bullets = renderEntry(entry);
 
@@ -276,5 +315,5 @@ if (require.main === module) process.exit(main(process.argv.slice(2)));
 
 module.exports = {
   LEADS, isOwnBullet, askedAbout, parseLock, normalise, diffLocks, directNames, directSpecs,
-  lockBullet, renderEntry, insertEntry, main,
+  skillNames, lockBullet, renderEntry, insertEntry, main,
 };
