@@ -164,25 +164,20 @@ jobs:
           # written line by line: a heredoc terminator has to be unindented, and an unindented
           # line inside a `run: |` block ends the block
           {
-            echo "\`release-dlthub-init.yml\` ran \`make version-upgrade-${LEVEL}\` on"
-            echo "[run ${GITHUB_RUN_ID}](${run_url}) and cut \`## [Unreleased]\` under a version heading."
+            echo "This releases \`${VERSION}\`. [Run ${GITHUB_RUN_ID}](${run_url}) moved the version and put everything \`## [Unreleased]\` had collected under a heading for it."
             echo
             echo "## What changed"
             echo
             echo "- \`pyproject.toml\` and \`uv.lock\` carry \`${VERSION}\`."
-            echo "- \`CHANGELOG.md\` gains \`## [${VERSION}] - ${DATE}\`, with everything"
-            echo "  \`## [Unreleased]\` had collected beneath it. \`[Unreleased]\` stays, empty."
+            echo "- \`CHANGELOG.md\` gains \`## [${VERSION}] - ${DATE}\`, and \`## [Unreleased]\` stays, empty."
             echo
             echo "## How to check it"
             echo
-            echo "\`make lock-check\` ran before this branch was pushed, and the repository's own CI runs"
-            echo "\`make ci\` on it. The entries below were reviewed when the pull requests that wrote them"
-            echo "merged; what is new here is the version they land under."
+            echo "\`make lock-check\` passed before this branch was pushed, and this repository's own CI runs \`make ci\` on it. The entries below were reviewed when the pull requests that wrote them merged. What is new here is the version they land under."
             echo
             echo "## Release notes"
             echo
-            echo "Merging this tags the merge commit \`v${VERSION}\` and creates the GitHub release with"
-            echo "the block below as its body. Publishing to PyPI is still \`make publish\`, by hand."
+            echo "Merging this tags the merge commit \`v${VERSION}\` and creates the GitHub release with the block below as its body. Publishing to PyPI is still \`make publish\`, by hand."
             echo
             cat /tmp/release-notes.md
           } > /tmp/release-pr.md
