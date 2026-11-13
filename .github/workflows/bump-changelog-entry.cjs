@@ -111,23 +111,45 @@ function askedAbout({ scaffold, root, deps, skills }) {
   return Object.keys(LEADS).filter((kind) => ({ scaffold, root, deps, skills })[kind]);
 }
 
-// direct dependencies carry both versions and transitives are counted, which is the shape
-// of every released entry
+/** "a", "a and b", "a, b and c" — the last separator is the one a reader expects. */
+function sentenceList(parts) {
+  if (parts.length < 2) return parts.join('');
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+const plural = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+
+// Direct dependencies are named and transitives are counted, which is the shape of every
+// released entry. It applies to a package arriving and leaving as much as to one moving
+// version: a transitive that left is the resolver's business, and naming thirteen of them
+// repeats, in a bullet about a lock, what the person who removed the dependency already
+// wrote in `### Removed`.
 function lockBullet({ lead, diff, direct }) {
-  const isDirect = (p) => direct.has(p.name);
-  const named = diff.moved.filter(isDirect);
-  const rest = diff.moved.length - named.length;
+  const split = (list) => {
+    const named = list.filter((p) => direct.has(p.name));
+    return { named, rest: list.length - named.length };
+  };
+  const moved = split(diff.moved);
+  const added = split(diff.added);
+  const removed = split(diff.removed);
+
   const parts = [lead];
-  if (named.length) parts.push(` (${versions(named).join(', ')})`);
-  const tail = [];
-  if (rest) tail.push(`${rest} transitive update${rest === 1 ? '' : 's'}`);
-  if (diff.added.length) {
-    tail.push(`added ${diff.added.map((p) => `\`${p.name}\` ${p.to}`).join(', ')}`);
+  if (moved.named.length) parts.push(` (${versions(moved.named).join(', ')})`);
+
+  const said = [];
+  if (added.named.length) {
+    said.push(`added ${added.named.map((p) => `\`${p.name}\` ${p.to}`).join(', ')}`);
   }
-  if (diff.removed.length) {
-    tail.push(`dropped ${diff.removed.map((p) => `\`${p.name}\``).join(', ')}`);
+  if (removed.named.length) {
+    said.push(`dropped ${removed.named.map((p) => `\`${p.name}\``).join(', ')}`);
   }
-  if (tail.length) parts.push(`, plus ${tail.join(', ')}`);
+  const counted = [];
+  if (moved.rest) counted.push(plural(moved.rest, 'transitive update'));
+  if (added.rest) counted.push(plural(added.rest, 'new transitive'));
+  if (removed.rest) counted.push(plural(removed.rest, 'transitive removal'));
+  if (counted.length) said.push(`plus ${sentenceList(counted)}`);
+
+  if (said.length) parts.push(`, ${said.join(', ')}`);
   return `- ${parts.join('')}.`;
 }
 
