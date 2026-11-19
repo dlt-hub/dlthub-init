@@ -76,6 +76,33 @@ jobs:
       - name: Build wheel
         run: uv build
 
+  # the locked dlt merges into existing projects, older dlt runs `dlthub init` and then `dlthub ai init`
+  older-dlt:
+    name: dlt ${{ matrix.dlt }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # the oldest supported dlt and the newest stable dlt that cannot merge
+        dlt: ["1.27.2", "1.32.0"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+
+      - name: Integration tests
+        run: uv run --frozen --with "dlt==${{ matrix.dlt }}" pytest tests_integration/test_e2e_workspace.py
+
   lock-check:
     name: uv.lock drift
     runs-on: ubuntu-latest
