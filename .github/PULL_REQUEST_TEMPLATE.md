@@ -1,8 +1,8 @@
 <!--
-Title: use Conventional Commits — type(scope): description
+Title: use Conventional Commits — type(scope): description. It is the line of the release notes.
   types: feat | fix | chore | bug | improvement
-  scope (optional, kebab-case): cli, scaffold, collisions, minimal-workspace, ...
-  e.g. fix(collisions): never overwrite an existing secrets.toml
+  scope (optional, kebab-case): cli, dlthub, telemetry, ...
+  e.g. fix(dlthub): pass --agent last
 -->
 
 ## Overview

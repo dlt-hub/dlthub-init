@@ -7,23 +7,21 @@ import sys
 from pathlib import Path
 
 from . import strings, telemetry
-from .collisions import Flags
-from .config import DEFAULT_SCAFFOLD, DISTRIBUTION_NAME
-from .display import (
-    console,
-    err_console,
-    print_collision,
-    print_header,
-    print_next_steps,
-    print_summary,
-    substep,
-    substep_detail,
+from .config import DISTRIBUTION_NAME
+from .display import console, print_command_failed, print_header, print_next_steps, print_sync_failed, substep
+from .dlthub import (
+    InitMode,
+    InitOptions,
+    build_env,
+    build_steps,
+    find_dlthub,
+    get_dlt_version,
+    has_workspace,
+    raise_on_failure,
+    run_step,
 )
-from .errors import CollisionError, UvError, WorkspaceError
-from .prompts import confirm, stdin_is_interactive
-from .scaffold import apply_scaffold, resolve_target
-from .skills import install_skills, skills_source
-from .uv import execute_uv_install, find_uv, run_uv_sync
+from .errors import DlthubCommandError, UvError, WorkspaceError
+from .uv import find_uv, run_uv_sync
 
 
 def _ensure_utf8_io_on_windows() -> None:
@@ -42,55 +40,76 @@ def _ensure_utf8_io_on_windows() -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=DISTRIBUTION_NAME,
-        description="Scaffold a dltHub workspace into a new or existing directory.",
+        description=(
+            "Create a dltHub workspace with `dlthub init`, set up your coding agent and install the"
+            " dependencies. In an existing project, dlthub lists the changes and asks first."
+        ),
     )
     parser.add_argument(
         "project_dir",
         nargs="?",
         default=None,
-        help="Directory to initialize. Defaults to the current directory.",
+        help="Directory to initialize, created when missing. Defaults to the current directory.",
     )
     parser.add_argument(
-        "--yes",
+        "--name",
+        default=None,
+        help="Workspace name. Defaults to the directory name.",
+    )
+    existing = parser.add_mutually_exclusive_group()
+    existing.add_argument(
+        "--overwrite",
+        action="store_true",
+        help=(
+            "Overwrite the existing dependency file, .gitignore and .dlt/.workspace instead of merging"
+            " into them. The settings files are never overwritten."
+        ),
+    )
+    existing.add_argument("--force", dest="overwrite", action="store_true", help=argparse.SUPPRESS)
+    existing.add_argument(
+        "--skip",
+        action="store_true",
+        help="Keep existing files as they are and create only the missing ones, without asking.",
+    )
+    parser.add_argument(
+        "--dependencies",
+        choices=["auto", "pyproject", "requirements"],
+        default=None,
+        help="Dependency file to create. See `dlthub init --help`.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the plan without writing anything.",
+    )
+    # takes a required value, unlike in `dlthub init`, so it never swallows the directory
+    parser.add_argument(
+        "--agent",
+        default=None,
+        metavar="NAME",
+        help="Coding agent to set up, for example claude, cursor, codex or cortex. Detected when omitted.",
+    )
+    parser.add_argument(
         "-y",
+        "--yes",
         action="store_true",
-        help=argparse.SUPPRESS,
+        help="Apply the changes to existing files without asking.",
     )
     parser.add_argument(
-        "--verbose",
         "-v",
+        "--verbose",
         action="store_true",
-        help="Stream output from uv.",
+        help="Show the output of uv sync.",
     )
     parser.add_argument(
         "--no-sync",
         action="store_true",
-        help="Scaffold files only; do not create a virtual environment or install dependencies.",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Overwrite existing generated files (never secrets).",
-    )
-    parser.add_argument(
-        "--merge",
-        action="store_true",
-        help="Append missing entries to an existing .gitignore instead of skipping it.",
-    )
-    parser.add_argument(
-        "--no-pyproject",
-        action="store_true",
-        help="Skip pyproject.toml.",
-    )
-    parser.add_argument(
-        "--no-gitignore",
-        action="store_true",
-        help="Skip .gitignore.",
+        help="Do not install the dependencies with uv sync.",
     )
     parser.add_argument(
         "--no-telemetry",
         action="store_true",
-        help="Disable usage telemetry for this run.",
+        help="Disable usage telemetry for this run, also in the dlthub commands it runs.",
     )
     return parser
 
@@ -106,10 +125,11 @@ def main(argv: list[str] | None = None) -> int:
         telemetry.track_run("cancelled")
         console.print(strings.MSG_CANCELLED)
         return 130
-    except CollisionError as exc:
+    except DlthubCommandError as exc:
+        telemetry.add_properties(failed_step=exc.step)
         telemetry.track_run("failed", error_code=type(exc).__name__)
-        print_collision(exc.conflicts)
-        return 2
+        print_command_failed(exc)
+        return exc.returncode if exc.returncode > 0 else 1
     except WorkspaceError as exc:
         telemetry.track_run("failed", error_code=type(exc).__name__)
         console.print(strings.MSG_ERROR_PREFIX.format(message=exc))
@@ -127,60 +147,68 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def run(args: argparse.Namespace) -> None:
-    telemetry.show_first_run_notice()
-
-    if args.yes:
-        err_console.print(strings.MSG_TESTING_SHORTCUT_NOTE)
-
-    verbose = args.verbose
-    scaffold = DEFAULT_SCAFFOLD
-    flags = Flags(
-        force=args.force,
-        merge=args.merge,
-        no_pyproject=args.no_pyproject,
-        no_gitignore=args.no_gitignore,
-    )
-
     project_dir = resolve_target(args.project_dir)
-    print_header(project_dir)
-
-    plan = apply_scaffold(project_dir, scaffold=scaffold, flags=flags)
-    installed_skills = install_skills(project_dir)
-    print_summary(plan)
-    if installed_skills:
-        substep_detail(strings.MSG_SKILLS_INSTALLED.format(count=len(installed_skills)))
-
-    synced = _maybe_sync(project_dir, args, verbose=verbose)
-    print_next_steps(
-        project_dir,
-        synced=synced,
-        uv_installed=find_uv() is not None,
-        interactive=stdin_is_interactive(),
-        skills_available=skills_source() is not None,
+    dlt_version = get_dlt_version()
+    telemetry.add_properties(dlt_version=str(dlt_version))
+    options = InitOptions(
+        mode=_get_mode(args),
+        name=args.name,
+        dependencies=args.dependencies,
+        dry_run=args.dry_run,
+        agent=args.agent,
+        yes=args.yes,
     )
-
-
-def _maybe_sync(project_dir: Path, args: argparse.Namespace, *, verbose: bool) -> bool:
-    if args.no_sync:
-        console.print(strings.MSG_SKIPPED_SYNC)
-        return False
-
+    dlthub = find_dlthub()
     uv_executable = find_uv()
-    if uv_executable is None and not (args.yes or confirm(strings.PROMPT_INSTALL_UV, default=True)):
-        console.print(strings.MSG_SKIPPED_SYNC)
-        return False
+    env = build_env(uv_executable, telemetry_off=telemetry.is_opted_out(args.no_telemetry))
 
-    if not args.yes and not confirm(strings.PROMPT_CREATE_VENV, default=True):
-        console.print(strings.MSG_SKIPPED_SYNC)
-        return False
+    print_header(project_dir, dlt_version)
+    _make_dir(project_dir)
+    for step in build_steps(options, dlt_version, workspace_exists=has_workspace(project_dir)):
+        raise_on_failure(step, run_step(dlthub, step, project_dir, env), options, dlt_version)
+    if options.dry_run:
+        return
 
+    if not (project_dir / "pyproject.toml").is_file():
+        # `uv sync` needs a pyproject.toml, dlthub already said how to install a requirements.txt
+        print_next_steps(project_dir, sync_pending=False)
+        return
+    synced = _maybe_sync(project_dir, uv_executable, no_sync=args.no_sync, verbose=args.verbose)
+    print_next_steps(project_dir, sync_pending=not synced)
+
+
+def resolve_target(requested_arg: str | None) -> Path:
+    if requested_arg is not None:
+        return Path(requested_arg).expanduser().resolve()
+    return Path.cwd().resolve()
+
+
+def _get_mode(args: argparse.Namespace) -> InitMode:
+    if args.overwrite:
+        return "overwrite"
+    if args.skip:
+        return "skip"
+    return "merge"
+
+
+def _make_dir(project_dir: Path) -> None:
     try:
-        if uv_executable is None:
-            uv_executable = execute_uv_install(verbose=verbose)
+        project_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise WorkspaceError(strings.ERROR_WRITE_FAILED.format(path=project_dir, reason=exc)) from exc
+
+
+def _maybe_sync(project_dir: Path, uv_executable: str | None, *, no_sync: bool, verbose: bool) -> bool:
+    if no_sync:
+        return False
+    if uv_executable is None:
+        console.print(strings.MSG_NO_UV)
+        return False
+    try:
         with substep(strings.MSG_INSTALLING_DEPS, strings.MSG_INSTALLED_DEPS, verbose=verbose):
             run_uv_sync(uv_executable, project_dir, verbose=verbose)
     except UvError as exc:
-        console.print(strings.MSG_SYNC_FAILED.format(message=exc))
+        print_sync_failed(exc)
         return False
     return True
 
