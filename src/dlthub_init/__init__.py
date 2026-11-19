@@ -1,1 +1,1 @@
-"""dlthub-init: scaffold a dltHub workspace into a new or existing directory."""
+"""dlthub-init: create a dltHub workspace with `dlthub init` and set up your coding agent."""

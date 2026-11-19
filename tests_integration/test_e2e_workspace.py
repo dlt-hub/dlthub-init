@@ -1,27 +1,23 @@
-import tempfile
-import unittest
-from pathlib import Path
+import pytest
 
 from dlthub_init.cli import main
 from dlthub_init.uv import find_uv
 
-
-@unittest.skipIf(find_uv() is None, "uv is not installed")
-class EndToEndWorkspaceTest(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.project_dir = Path(self._tmp.name) / "ws"
-
-    def tearDown(self):
-        self._tmp.cleanup()
-
-    def test_yes_scaffolds_and_syncs(self):
-        self.assertEqual(main([str(self.project_dir), "--yes"]), 0)
-        self.assertTrue((self.project_dir / "pyproject.toml").exists())
-        self.assertTrue((self.project_dir / ".venv" / "pyvenv.cfg").exists())
-        self.assertTrue((self.project_dir / ".agents" / "skills").is_dir())
-        self.assertTrue((self.project_dir / ".mcp.json").exists())
+pytestmark = pytest.mark.skipif(find_uv() is None, reason="uv is not installed")
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_creates_workspace_sets_up_agent_and_syncs(tmp_path) -> None:
+    """Runs the real `dlthub init` of the installed dlt, fetches the AI harness and syncs."""
+    project_dir = tmp_path / "ws"
+    assert main([str(project_dir), "--agent", "claude", "--no-telemetry"]) == 0
+    assert (project_dir / ".dlt" / ".workspace").exists()
+    assert (project_dir / "pyproject.toml").exists()
+    assert (project_dir / ".claude" / "skills").is_dir()
+    assert (project_dir / ".mcp.json").exists()
+    assert (project_dir / ".venv" / "pyvenv.cfg").exists()
+
+
+def test_dry_run_writes_nothing(tmp_path) -> None:
+    project_dir = tmp_path / "ws"
+    assert main([str(project_dir), "--agent", "claude", "--dry-run", "--no-telemetry"]) == 0
+    assert list(project_dir.iterdir()) == []

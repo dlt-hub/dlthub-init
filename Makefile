@@ -1,9 +1,8 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major require-posthog-key publish ci lock-upgrade lock-check scaffold-lock-upgrade scaffold-lock-check scaffold-deps-sync scaffold-deps-check generate-skills update-skills check-skills workspace workspace-init workspace-env workspace-local workspace-dev
+.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major require-posthog-key publish ci lock-upgrade lock-check workspace workspace-init workspace-env workspace-local workspace-dev
 
-PYTHON_SOURCES := src tests tests_integration scripts
-SCAFFOLD_DIR ?= src/dlthub_init/scaffolds/minimal_workspace
+PYTHON_SOURCES := src tests tests_integration
 
 -include .make.env
 export DLTHUB_INIT_POSTHOG_KEY
@@ -35,18 +34,14 @@ fl: format lint-fix ## Format and lint-fix in one shot
 lint-ci: format-check lint ## CI lint workflow (format-check then lint)
 
 test: ## Run unit tests (fast)
-	uv run python -m unittest discover -s tests -t .
+	uv run pytest tests
 
-test-integration: ## Run e2e integration tests (slow; invokes real CLI + uv sync)
-	uv run python -m unittest discover -s tests_integration -t .
-
-#
-# Manual test workspaces (under examples/, which is gitignored)
-#
+test-integration: ## Run e2e integration tests (slow; runs dlthub init, the agent setup and uv sync)
+	uv run pytest tests_integration
 
 WORKSPACE_DIR ?= examples/my-workspace
 
-workspace: dev ## Scaffold a fresh ./$(WORKSPACE_DIR) for eyeballing output (pre-deletes; pass ARGS="--no-sync")
+workspace: dev ## Create a fresh ./$(WORKSPACE_DIR) for eyeballing output (pre-deletes; pass ARGS="--no-sync --agent claude")
 	@case "$(WORKSPACE_DIR)" in *..*|"") echo "invalid WORKSPACE_DIR: $(WORKSPACE_DIR)"; exit 1;; esac
 	rm -rf -- "$(WORKSPACE_DIR)"
 	uv run dlthub-init "$(WORKSPACE_DIR)" $(ARGS)
@@ -145,53 +140,4 @@ lock-check: ## CI guard: fail if the root uv.lock is out of sync with pyproject.
 		exit 1; \
 	fi
 
-scaffold-lock-upgrade: ## Re-resolve the bundled workspace uv.lock (PKG=<name> to bump one); review the diff and commit
-	uv lock $(if $(PKG),--upgrade-package $(PKG),--upgrade) --project $(SCAFFOLD_DIR)
-
-scaffold-lock-check: ## CI guard: fail if the bundled workspace uv.lock is out of sync with its pyproject
-	@echo "scaffold-lock-check: checking $(SCAFFOLD_DIR)/uv.lock against its pyproject.toml…"; \
-	log="$$(mktemp)"; \
-	if uv lock --check --project $(SCAFFOLD_DIR) >"$$log" 2>&1; then \
-		rm -f "$$log"; \
-		echo "scaffold-lock-check: OK — uv.lock is in sync with pyproject.toml."; \
-	else \
-		echo "scaffold-lock-check: FAILED — run 'make scaffold-lock-upgrade' and commit. uv output:"; \
-		cat "$$log"; rm -f "$$log"; \
-		exit 1; \
-	fi
-
-scaffold-deps-sync: ## Sync the bundled workspace deps with dlt's workspace_deps(); review the diff, re-run scaffold-lock-upgrade, and commit
-	uv run python scripts/sync_workspace_deps.py
-
-scaffold-deps-check: ## CI guard: fail if the bundled workspace deps drift from dlt's workspace_deps()
-	uv run python scripts/sync_workspace_deps.py --check
-
-#
-# Skills (pulled from the dltHub AI workbench)
-#
-
-generate-skills: ## Populate skills/ from the dltHub AI workbench at the pinned WORKBENCH_REF
-	uv run python scripts/generate_skills.py
-
-update-skills: ## Bump the workbench ref (REF=<sha>, or latest) and regenerate skills/
-	uv run python scripts/update_skills.py $(REF)
-
-check-skills: ## CI guard: fail if skills/ differs from the generated output
-	@echo "check-skills: regenerating skills/ (output hidden unless it fails)…"; \
-	log="$$(mktemp)"; \
-	if ! uv run python scripts/generate_skills.py >"$$log" 2>&1; then \
-		echo "check-skills: generate-skills failed — its output:"; \
-		cat "$$log"; rm -f "$$log"; exit 1; \
-	fi; \
-	rm -f "$$log"; \
-	changed="$$(git status --porcelain -- skills)"; \
-	if [ -z "$$changed" ]; then \
-		echo "check-skills: OK — skills/ is up to date."; \
-	else \
-		echo "check-skills: FAILED — skills/ differs from 'make generate-skills'; regenerate and commit:"; \
-		printf '%s\n' "$$changed" | sed 's/^/    /'; \
-		git --no-pager diff -- skills; \
-		exit 1; \
-	fi
-
-ci: lint-ci test test-integration lock-check scaffold-lock-check scaffold-deps-check check-skills build ## Run all CI checks locally
+ci: lint-ci test test-integration lock-check build ## Run all CI checks locally
