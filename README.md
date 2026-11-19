@@ -95,3 +95,27 @@ make lint     # ruff + mypy
 make test     # unit tests
 make ci       # full local CI
 ```
+
+## Releasing
+
+You run two `make` targets on your machine. In between, GitHub creates the tag and the release when you merge.
+
+```bash
+# on your machine, on a clean devel that matches origin/devel, logged in with gh
+make prepare-release              # LEVEL=minor or LEVEL=major for a bigger bump
+# review and merge the release pull request on GitHub, then
+git fetch --tags && git checkout vX.Y.Z
+make publish                      # needs the PostHog key in .make.env, see CONTRIBUTING.md
+```
+
+1. `make prepare-release` (your machine) works out the new version with `uv version --bump --dry-run`, checks that
+   neither its tag nor its release branch exists and no release pull request is open, and shows the commits since the
+   last release, stopping when there are none. After you confirm, it bumps the version with `uv version --bump`, commits
+   `chore: bump version to X.Y.Z` on a new branch `chore/release-vX.Y.Z`, pushes it and opens a pull request labelled
+   `release`, which starts CI. You stay on the release branch, also when a step fails.
+2. You merge the pull request when CI passes. The `release` workflow (GitHub) tags the merge commit `vX.Y.Z` and
+   creates the GitHub release.
+3. `make publish` (your machine) uploads the tagged version to PyPI.
+
+There is no changelog file. GitHub generates the release notes from the titles of the pull requests merged since the
+last release, so write those titles as [Conventional Commits](https://www.conventionalcommits.org/).

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major require-posthog-key publish ci lock-upgrade lock-check workspace workspace-init
+.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major prepare-release require-posthog-key publish ci lock-upgrade lock-check workspace workspace-init
 
 PYTHON_SOURCES := src tests tests_integration
 
@@ -86,6 +86,52 @@ version-upgrade-minor: ## Bump the minor version non-interactively (AI/CI-friend
 
 version-upgrade-major: ## Bump the major version non-interactively (AI/CI-friendly)
 	@$(MAKE) version-upgrade LEVEL=major
+
+prepare-release: LEVEL ?= patch
+prepare-release: ## Open the release pull request for origin/devel after a confirmation (LEVEL=patch|minor|major, default patch)
+	@set -e; \
+	case "$(LEVEL)" in major|minor|patch) ;; *) echo "prepare-release: LEVEL must be major, minor or patch, got '$(LEVEL)'"; exit 1;; esac; \
+	if [ "$$(git branch --show-current)" != "devel" ]; then echo "prepare-release: switch to devel first"; exit 1; fi; \
+	if [ -n "$$(git status --porcelain)" ]; then echo "prepare-release: the working tree has changes, commit or stash them first"; exit 1; fi; \
+	gh auth status >/dev/null 2>&1 || { echo "prepare-release: log in with 'gh auth login' first"; exit 1; }; \
+	git fetch --quiet --tags origin; \
+	if [ "$$(git rev-parse HEAD)" != "$$(git rev-parse origin/devel)" ]; then echo "prepare-release: devel is not at origin/devel, pull or push first"; exit 1; fi; \
+	open=$$(gh pr list --label release --state open --json number --jq 'map("#\(.number)") | join(", ")'); \
+	if [ -n "$$open" ]; then echo "prepare-release: release pull request $$open is open, merge or close it first"; exit 1; fi; \
+	current=$$(uv version --short); \
+	version=$$(uv version --bump "$(LEVEL)" --dry-run --short); \
+	previous=$$(git describe --tags --abbrev=0 --match 'v*'); \
+	branch="chore/release-v$$version"; \
+	if git rev-parse -q --verify "refs/tags/v$$version" >/dev/null; then echo "prepare-release: tag v$$version exists locally"; exit 1; fi; \
+	if [ -n "$$(git ls-remote --tags origin "refs/tags/v$$version")" ]; then echo "prepare-release: tag v$$version exists on origin"; exit 1; fi; \
+	if [ -n "$$(git ls-remote --heads origin "$$branch")" ]; then echo "prepare-release: branch $$branch exists on origin"; exit 1; fi; \
+	if [ "$$(git rev-list --count "$$previous..HEAD")" = "0" ]; then echo "prepare-release: nothing to release, devel has no commits since $$previous"; exit 1; fi; \
+	echo "Release $$current -> $$version from origin/devel at $$(git log -1 --format='%h %s')"; \
+	echo "Commits since $$previous:"; \
+	git log --no-merges --format='  %h %s' "$$previous..HEAD"; \
+	echo "This will:"; \
+	echo "  - run uv version --bump $(LEVEL) and commit 'chore: bump version to $$version' on a new branch $$branch"; \
+	echo "  - push $$branch and open a pull request labelled 'release' into devel, which starts CI"; \
+	echo "You stay on $$branch."; \
+	echo "Merging the pull request tags its merge commit v$$version and creates the GitHub release."; \
+	printf "Proceed? [y/N] "; \
+	read -r answer || true; \
+	case "$$answer" in y|Y|yes) ;; *) echo "prepare-release: cancelled"; exit 1;; esac; \
+	body=$$(mktemp); \
+	{ \
+		echo "Merging this pull request tags its merge commit \`v$$version\` and creates the GitHub release with notes generated from the pull requests merged since \`$$previous\`."; \
+		echo; \
+		echo "### Commits since $$previous"; \
+		echo; \
+		git log --no-merges --format='- %s (%h)' "$$previous..HEAD"; \
+	} > "$$body"; \
+	trap 'rm -f "$$body"' EXIT; \
+	git switch -q -c "$$branch"; \
+	uv version --bump "$(LEVEL)" --no-sync; \
+	git commit -q -am "chore: bump version to $$version"; \
+	git push -q origin "$$branch"; \
+	gh label create release --color 0E8A16 --description "Merging creates the GitHub release" --force >/dev/null; \
+	gh pr create --base devel --head "$$branch" --label release --title "chore: bump version to $$version" --body-file "$$body"
 
 require-posthog-key:
 	@case "$(DLTHUB_INIT_POSTHOG_KEY)" in \
