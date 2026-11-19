@@ -30,8 +30,17 @@ the agent setup belongs in dlt or in the AI harness, not here.
 
 ## Testing another dlt
 
-The dev environment resolves the newest stable dlt. To run against a dlt
-pre-release or a local checkout, install it into a separate environment:
+The dev environment is locked to a dlt pre-release that merges into existing
+projects, set by `constraint-dependencies` in `pyproject.toml`. Drop the
+constraint once dlt 1.33.0 is released. CI also runs the integration tests on
+older dlt, which runs `dlthub init` and then `dlthub ai init`. To do the same
+locally:
+
+```bash
+uv run --with "dlt==1.32.0" pytest tests_integration
+```
+
+To run against a local dlt checkout, install it into a separate environment:
 
 ```bash
 uv venv /tmp/dlthub-init-venv

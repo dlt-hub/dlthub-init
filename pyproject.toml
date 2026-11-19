@@ -38,6 +38,10 @@ dev = [
 [project.scripts]
 dlthub-init = "dlthub_init.cli:main"
 
+[tool.uv]
+# develop and test against the first dlt pre-release that merges into existing projects
+constraint-dependencies = ["dlt>=1.33.0a2"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py311"
