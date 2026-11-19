@@ -1,56 +1,79 @@
 # dlthub-init (beta)
 
-Scaffold a [dltHub](https://dlthub.com) workspace into a new or existing directory.
+Create a [dltHub](https://dlthub.com) workspace in a new or existing directory and set up your coding agent.
 
-`dlthub-init` lays down the files of a minimal dltHub workspace — `pyproject.toml`,
-a locked `uv.lock`, the `.dlt/` configuration, and a `.mcp.json` registering the
-dlt workspace MCP server — and optionally creates the virtual environment. That is all it does: it does not log in, run a pipeline, or
-install agent toolkits.
-
-Unlike `dlthub-start`, it is safe to run inside an existing repository. It is
-non-destructive by default: it never overwrites your files, and it stops before
-writing anything if a generated path would collide with something already there.
+`dlthub-init` runs `dlthub init` from the newest dlt, then installs the dependencies with `uv sync`. It ships no
+workspace files of its own: the workspace files, the dependencies and the skills, rules and MCP server of your coding
+agent all come from dlt, so they are always current.
 
 ## Usage
 
 ```bash
-uvx dlthub-init             # initialize the current directory
-uvx dlthub-init my-workspace  # initialize ./my-workspace
+uvx dlthub-init@latest                 # initialize the current directory
+uvx dlthub-init@latest my-workspace    # initialize ./my-workspace, created when missing
+uvx dlthub-init@latest --agent cursor  # name the coding agent instead of detecting it
 ```
 
-After scaffolding, `dlthub-init` offers to create a virtual environment and
-install dependencies with `uv`.
+`@latest` makes uv resolve the newest `dlthub-init` and the newest dlt on every run.
+
+The coding agent is always set up. Inside a Claude Code, Cursor, Codex or Cortex Code session it is detected, so you
+don't need `--agent`. Outside a session, dlt picks the agent installed for your user. If it finds none, or more than
+one, it stops and asks for `--agent`.
+
+In an existing project, `dlthub init` merges into your files. It lists the existing files it changes and the lines it
+adds, then asks whether to proceed. `-y` applies the changes without asking. Without a terminal and without `-y`, it
+changes nothing and exits with an error, so an agent can show you the list first and re-run with `-y`.
 
 ### Options
 
-| Flag | Effect |
+These options are passed on to `dlthub init`:
+
+| Option | Effect |
 | --- | --- |
-| `--no-sync` | Scaffold files only; do not create a venv or install dependencies. |
-| `--force` | Overwrite existing generated files (never secrets). |
-| `--merge` | Append missing entries to an existing `.gitignore` instead of skipping it. |
-| `--no-pyproject` | Skip `pyproject.toml`. |
-| `--no-gitignore` | Skip `.gitignore`. |
-| `--no-telemetry` | Disable usage telemetry for this run. |
-| `--verbose`, `-v` | Stream output from `uv`. |
+| `--name NAME` | Workspace name. Defaults to the directory name. |
+| `--overwrite` | Overwrite the dependency file, `.gitignore` and `.dlt/.workspace` instead of merging into them. Asks first on dlt 1.33.0 or newer. Settings files are never overwritten. |
+| `--skip` | Keep existing files as they are and create only the missing ones, without asking. |
+| `--dependencies {auto,pyproject,requirements}` | Dependency file to create. |
+| `--dry-run` | Print the plan without writing anything. |
+| `--agent NAME` | Coding agent to set up: `claude`, `cursor`, `codex` or `cortex`. Detected when omitted. |
+| `-y`, `--yes` | Apply the changes to existing files without asking. |
 
-## Collision behavior
+These belong to `dlthub-init`:
 
-`dlthub-init` is safe to run in an existing directory:
+| Option | Effect |
+| --- | --- |
+| `DIR` | Directory to initialize, created when missing. Defaults to the current directory. |
+| `--no-sync` | Don't install the dependencies with `uv sync`. |
+| `--no-telemetry` | Disable usage telemetry for this run, also in the `dlthub` commands it runs. |
+| `-v`, `--verbose` | Show the output of `uv sync`. |
 
-- Missing files are **created**.
-- The run stops only if `.dlt/.workspace` already exists — the directory is
-  already a dltHub workspace (override with `--force`).
-- Otherwise existing files are **left alone** and reported as skipped: your
-  `pyproject.toml`, `.dlt/config.toml`, `.dlt/secrets.toml`, and `.mcp.json` are
-  never overwritten, and `.gitignore` is skipped (or **merged** with `--merge`).
-- `uv.lock` is written only when `pyproject.toml` is created, so the lockfile
-  always matches the workspace's dependencies.
-- `--force` overwrites the generated files (never secrets).
+## Output
+
+`dlthub-init` shows the full output of `dlthub init`: the plan with each file it creates, keeps, merges or overwrites,
+the confirmation when existing files change, the agent setup and dlt's next steps. Then it installs the dependencies
+behind a spinner and prints what to do next. When `uv sync` fails, its output is shown and the workspace stays as
+`dlthub init` left it.
+
+## dlt versions
+
+`dlthub-init` uses the newest dlt that uv resolves, which is the newest stable release.
+
+| dlt | What runs |
+| --- | --- |
+| 1.33.0 or newer | `dlthub init --agent`, which merges into existing projects |
+| 1.27.2 to 1.32.x | `dlthub init`, then `dlthub ai init`. Nothing is merged: existing files are kept, an existing workspace only gets the agent setup, and `--overwrite` maps to `--force` |
+
+1.33.0a2 is the first pre-release that merges. The pre-releases 1.33.0a0 and 1.33.0a1 run as in the second row. To
+try a dlt pre-release:
+
+```bash
+uvx --prerelease allow dlthub-init@latest
+uvx --with "dlt==<version>" dlthub-init@latest
+```
 
 ## Telemetry
 
-`dlthub-init` sends anonymous usage events so we can improve the scaffolding
-experience.
+`dlthub-init` sends anonymous usage events so we can improve the setup experience.
 
 No personal data is collected, and no workspace contents are ever sent.
 
@@ -62,6 +85,8 @@ Telemetry is controlled by the following, in order of precedence:
 4. an existing dlt opt-out (`~/.dlt/config.toml` `[runtime] dlthub_telemetry = false`,
    or `RUNTIME__DLTHUB_TELEMETRY=false`).
 
+The first three also turn dlt's telemetry off in the `dlthub` commands that `dlthub-init` runs, for this run only.
+
 ## Development
 
 ```bash
@@ -70,7 +95,3 @@ make lint     # ruff + mypy
 make test     # unit tests
 make ci       # full local CI
 ```
-
-The bundled workspace lives in `src/dlthub_init/scaffolds/minimal_workspace`.
-After editing its `pyproject.toml`, run `make scaffold-lock-upgrade` to refresh
-the committed `uv.lock`.
