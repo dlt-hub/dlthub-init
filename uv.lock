@@ -264,7 +264,7 @@ wheels = [
 
 [[package]]
 name = "dlt"
-version = "1.33.0a2"
+version = "1.33.0a3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -296,9 +296,9 @@ dependencies = [
     { name = "tzdata" },
     { name = "win-precise-time", marker = "python_full_version < '3.13' and os_name == 'nt'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/21/04/940f939cbe9ea6548b535235f2646a2f315348545873180e4b7b00bd54b7/dlt-1.33.0a2.tar.gz", hash = "sha256:6e35e1b64241b904563dbf67e450db403002338a4dcfd8cc530f880acff32dc1", size = 1320804, upload-time = "2026-11-18T23:52:14.442Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2b/ff/5a0d0a1d8767348330e16eea0e788bfdd57414e3c6811bb0bf53333085e5/dlt-1.33.0a3.tar.gz", hash = "sha256:095e8f2954d2e7a5f10c73bfdf0b0a8a0a2651015408234fe33dea9ef029343e", size = 1335193, upload-time = "2026-11-22T22:03:46.332Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5e/5c/459458ab2c564683c8d1f73e6bb7fefd933383f5ccb162213cfd672a2c3e/dlt-1.33.0a2-py3-none-any.whl", hash = "sha256:ae75f40e00dcf77ad10551a6e7bddf951aa3d6fbef186ce7e31271b5c900ed3b", size = 1615902, upload-time = "2026-11-18T23:52:10.938Z" },
+    { url = "https://files.pythonhosted.org/packages/62/27/833d12372031235fcc097220602bea208a7a45f706236cd400e28c63a1e7/dlt-1.33.0a3-py3-none-any.whl", hash = "sha256:c88bbfc089b81497cc49c8e1dfc0f0e55f44e6f9ecf8e84c4c20b4d25b1f4fbe", size = 1631204, upload-time = "2026-11-22T22:03:50.46Z" },
 ]
 
 [[package]]
