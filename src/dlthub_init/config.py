@@ -13,4 +13,6 @@ except PackageNotFoundError:
 
 POSTHOG_HOST = "https://eu.i.posthog.com"
 
-DEFAULT_SCAFFOLD = "minimal_workspace"
+# 1.33.0a0 and a1 take `--agent` but cannot merge, so they run `dlthub ai init` separately
+AGENT_INIT_MIN_DLT = "1.33.0a2"
+"""First dlt whose `dlthub init` sets up the coding agent and merges into existing projects."""

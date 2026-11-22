@@ -1,4 +1,4 @@
-"""Rich-powered terminal output: status lines, write summary, next steps."""
+"""Rich-powered terminal output: header, sync spinner, failures, next steps."""
 
 from __future__ import annotations
 
@@ -7,31 +7,15 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from packaging.version import Version
 from rich.console import Console
 from rich.markup import escape
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from . import strings
-from .collisions import Outcome, PlannedPath
+from .errors import DlthubCommandError, UvError
 
 console = Console()
-err_console = Console(stderr=True)
-
-_SUMMARY_SECTIONS = (
-    (Outcome.CREATE, strings.LABEL_CREATED, "green"),
-    (Outcome.OVERWRITE, strings.LABEL_OVERWRITTEN, "yellow"),
-    (Outcome.MERGE, strings.LABEL_MERGED, "yellow"),
-    (Outcome.SKIP, strings.LABEL_SKIPPED, "dim"),
-    (Outcome.DISABLED, strings.LABEL_DISABLED, "dim"),
-)
-
-
-def substep_done(message: str) -> None:
-    console.print(f"[green]✓[/green] {message}")
-
-
-def substep_detail(message: str) -> None:
-    console.print(f"[dim]{message}[/dim]")
 
 
 @contextmanager
@@ -48,47 +32,31 @@ def substep(running: str, done: str, *, verbose: bool = False) -> Iterator[None]
         ) as progress:
             progress.add_task(running, total=None)
             yield
-    substep_done(done)
+    console.print(f"[green]✓[/green] {done}")
 
 
-def print_header(project_dir: Path) -> None:
-    console.print(strings.MSG_HEADER.format(project_dir=_display_path(project_dir)))
+def print_header(project_dir: Path, dlt_version: Version) -> None:
+    console.print(strings.MSG_HEADER.format(project_dir=escape(_display_path(project_dir)), dlt_version=dlt_version))
 
 
-def print_summary(plan: list[PlannedPath]) -> None:
-    printed = False
-    for outcome, label, style in _SUMMARY_SECTIONS:
-        entries = sorted(str(p.relative) for p in plan if p.outcome is outcome)
-        if not entries:
-            continue
-        printed = True
-        console.print(f"\n[bold {style}]{label}:[/bold {style}]")
-        for entry in entries:
-            console.print(f"  {entry}")
-    if not printed:
-        console.print(strings.MSG_NOTHING_WRITTEN)
+def print_command_failed(exc: DlthubCommandError) -> None:
+    console.print(strings.MSG_STEP_FAILED.format(step=exc.step, returncode=exc.returncode))
+    if exc.hint:
+        console.print(exc.hint)
 
 
-def print_next_steps(
-    project_dir: Path,
-    *,
-    synced: bool,
-    uv_installed: bool,
-    interactive: bool = True,
-    skills_available: bool = False,
-) -> None:
+def print_sync_failed(exc: UvError) -> None:
+    console.print(strings.MSG_SYNC_FAILED.format(message=escape(str(exc))))
+
+
+def print_next_steps(project_dir: Path, *, sync_pending: bool) -> None:
     steps: list[tuple[str, str | None]] = []
     cd = _display_path(project_dir)
     if cd != ".":
         steps.append((strings.STEPS_LABEL_CD, strings.CMD_CD.format(project_dir=cd)))
-    if not synced:
-        if not uv_installed:
-            steps.append((strings.STEPS_LABEL_INSTALL_UV, strings.CMD_INSTALL_UV_UNIX))
+    if sync_pending:
         steps.append((strings.STEPS_LABEL_INSTALL_DEPS, strings.CMD_UV_SYNC))
-    if not interactive and skills_available:
-        steps.append((strings.STEPS_LABEL_USE_SKILLS, None))
-    else:
-        steps.append((strings.STEPS_LABEL_OPEN_AGENT, None))
+    steps.append((strings.STEPS_LABEL_OPEN_AGENT, None))
 
     single = len(steps) == 1
     header = strings.LABEL_NEXT_STEP if single else strings.LABEL_NEXT_STEPS
@@ -98,14 +66,6 @@ def print_next_steps(
         console.print(f"  {prefix}{label}")
         if command is not None:
             console.print(f"     [bold #59C1D5]{escape(command)}[/bold #59C1D5]")
-
-
-def print_collision(conflicts: list[str]) -> None:
-    err_console.print(strings.MSG_COLLISION_HEADER)
-    for path in conflicts:
-        err_console.print(f"  [bold]{path}[/bold]")
-    err_console.print(strings.MSG_COLLISION_NO_CHANGES)
-    err_console.print(strings.MSG_COLLISION_HINT)
 
 
 def _display_path(project_dir: Path) -> str:

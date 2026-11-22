@@ -1,9 +1,8 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major require-posthog-key publish ci lock-upgrade lock-check scaffold-lock-upgrade scaffold-lock-check scaffold-deps-sync scaffold-deps-check generate-skills update-skills check-skills workspace workspace-init workspace-env workspace-local workspace-dev
+.PHONY: help dev lint lint-fix format format-check fl lint-ci test test-integration build clean-dist version-upgrade version-upgrade-patch version-upgrade-minor version-upgrade-major prepare-release require-posthog-key publish ci lock-upgrade lock-check workspace workspace-init
 
-PYTHON_SOURCES := src tests tests_integration scripts
-SCAFFOLD_DIR ?= src/dlthub_init/scaffolds/minimal_workspace
+PYTHON_SOURCES := src tests tests_integration
 
 -include .make.env
 export DLTHUB_INIT_POSTHOG_KEY
@@ -35,18 +34,14 @@ fl: format lint-fix ## Format and lint-fix in one shot
 lint-ci: format-check lint ## CI lint workflow (format-check then lint)
 
 test: ## Run unit tests (fast)
-	uv run python -m unittest discover -s tests -t .
+	uv run pytest tests
 
-test-integration: ## Run e2e integration tests (slow; invokes real CLI + uv sync)
-	uv run python -m unittest discover -s tests_integration -t .
-
-#
-# Manual test workspaces (under examples/, which is gitignored)
-#
+test-integration: ## Run e2e integration tests (slow; runs dlthub init, the agent setup and uv sync)
+	uv run pytest tests_integration
 
 WORKSPACE_DIR ?= examples/my-workspace
 
-workspace: dev ## Scaffold a fresh ./$(WORKSPACE_DIR) for eyeballing output (pre-deletes; pass ARGS="--no-sync")
+workspace: dev ## Create a fresh ./$(WORKSPACE_DIR) for eyeballing output (pre-deletes; pass ARGS="--no-sync --agent claude")
 	@case "$(WORKSPACE_DIR)" in *..*|"") echo "invalid WORKSPACE_DIR: $(WORKSPACE_DIR)"; exit 1;; esac
 	rm -rf -- "$(WORKSPACE_DIR)"
 	uv run dlthub-init "$(WORKSPACE_DIR)" $(ARGS)
@@ -58,33 +53,6 @@ workspace-init: dev ## Init in place: make empty ./$(WORKSPACE_INIT_DIR), cd in,
 	rm -rf -- "$(WORKSPACE_INIT_DIR)"
 	mkdir -p -- "$(WORKSPACE_INIT_DIR)"
 	cd "$(WORKSPACE_INIT_DIR)" && "$(CURDIR)/.venv/bin/dlthub-init" $(ARGS)
-
-# Local/dev/stage stack testing parity with dlthub-start. dlthub-init never talks to a
-# stack while scaffolding, so there are no --api-base-url flags to pass; instead we
-# scaffold a fresh workspace and then pin api_base_url/auth_base_url into its
-# .dlt/config.toml, which a subsequent `dlthub workspace connect` reads.
-API_BASE_URL ?=
-AUTH_BASE_URL ?=
-DLT_RUNTIME_INSECURE ?=
-
-workspace-env: workspace ## Scaffold ./$(WORKSPACE_DIR) then pin API_BASE_URL (+ AUTH_BASE_URL if set) into .dlt/config.toml
-	@if [ -z "$(API_BASE_URL)" ]; then \
-		echo "workspace-env: set API_BASE_URL (or use 'make workspace-local' / 'make workspace-dev')"; exit 1; \
-	fi
-	uv run python scripts/pin_workspace_urls.py "$(WORKSPACE_DIR)/.dlt/config.toml" "$(API_BASE_URL)" $(if $(AUTH_BASE_URL),"$(AUTH_BASE_URL)")
-	@if [ -n "$(DLT_RUNTIME_INSECURE)" ]; then \
-		echo "workspace-env: local stack uses mkcert certs — before 'dlthub workspace connect', run:"; \
-		echo "    export DLT_RUNTIME_INSECURE=$(DLT_RUNTIME_INSECURE)"; \
-	fi
-
-workspace-local: ## Scaffold ./$(WORKSPACE_DIR) pointed at the local stack (api/auth.dlthub.test, insecure TLS)
-	@$(MAKE) workspace-env \
-		API_BASE_URL=https://api.dlthub.test \
-		AUTH_BASE_URL=https://auth.dlthub.test \
-		DLT_RUNTIME_INSECURE=true
-
-workspace-dev: ## Scaffold ./$(WORKSPACE_DIR) pointed at the dev stack (api.dlthub.dev; auth shares the api host)
-	@$(MAKE) workspace-env API_BASE_URL=https://api.dlthub.dev
 
 build: dev ## Build the package wheel
 	uv build
@@ -119,6 +87,52 @@ version-upgrade-minor: ## Bump the minor version non-interactively (AI/CI-friend
 version-upgrade-major: ## Bump the major version non-interactively (AI/CI-friendly)
 	@$(MAKE) version-upgrade LEVEL=major
 
+prepare-release: LEVEL ?= patch
+prepare-release: ## Open the release pull request for origin/devel after a confirmation (LEVEL=patch|minor|major, default patch)
+	@set -e; \
+	case "$(LEVEL)" in major|minor|patch) ;; *) echo "prepare-release: LEVEL must be major, minor or patch, got '$(LEVEL)'"; exit 1;; esac; \
+	if [ "$$(git branch --show-current)" != "devel" ]; then echo "prepare-release: switch to devel first"; exit 1; fi; \
+	if [ -n "$$(git status --porcelain)" ]; then echo "prepare-release: the working tree has changes, commit or stash them first"; exit 1; fi; \
+	gh auth status >/dev/null 2>&1 || { echo "prepare-release: log in with 'gh auth login' first"; exit 1; }; \
+	git fetch --quiet --tags origin; \
+	if [ "$$(git rev-parse HEAD)" != "$$(git rev-parse origin/devel)" ]; then echo "prepare-release: devel is not at origin/devel, pull or push first"; exit 1; fi; \
+	open=$$(gh pr list --label release --state open --json number --jq 'map("#\(.number)") | join(", ")'); \
+	if [ -n "$$open" ]; then echo "prepare-release: release pull request $$open is open, merge or close it first"; exit 1; fi; \
+	current=$$(uv version --short); \
+	version=$$(uv version --bump "$(LEVEL)" --dry-run --short); \
+	previous=$$(git describe --tags --abbrev=0 --match 'v*'); \
+	branch="chore/release-v$$version"; \
+	if git rev-parse -q --verify "refs/tags/v$$version" >/dev/null; then echo "prepare-release: tag v$$version exists locally"; exit 1; fi; \
+	if [ -n "$$(git ls-remote --tags origin "refs/tags/v$$version")" ]; then echo "prepare-release: tag v$$version exists on origin"; exit 1; fi; \
+	if [ -n "$$(git ls-remote --heads origin "$$branch")" ]; then echo "prepare-release: branch $$branch exists on origin"; exit 1; fi; \
+	if [ "$$(git rev-list --count "$$previous..HEAD")" = "0" ]; then echo "prepare-release: nothing to release, devel has no commits since $$previous"; exit 1; fi; \
+	echo "Release $$current -> $$version from origin/devel at $$(git log -1 --format='%h %s')"; \
+	echo "Commits since $$previous:"; \
+	git log --no-merges --format='  %h %s' "$$previous..HEAD"; \
+	echo "This will:"; \
+	echo "  - run uv version --bump $(LEVEL) and commit 'chore: bump version to $$version' on a new branch $$branch"; \
+	echo "  - push $$branch and open a pull request labelled 'release' into devel, which starts CI"; \
+	echo "You stay on $$branch."; \
+	echo "Merging the pull request tags its merge commit v$$version and creates the GitHub release."; \
+	printf "Proceed? [y/N] "; \
+	read -r answer || true; \
+	case "$$answer" in y|Y|yes) ;; *) echo "prepare-release: cancelled"; exit 1;; esac; \
+	body=$$(mktemp); \
+	{ \
+		echo "Merging this pull request tags its merge commit \`v$$version\` and creates the GitHub release with notes generated from the pull requests merged since \`$$previous\`."; \
+		echo; \
+		echo "### Commits since $$previous"; \
+		echo; \
+		git log --no-merges --format='- %s (%h)' "$$previous..HEAD"; \
+	} > "$$body"; \
+	trap 'rm -f "$$body"' EXIT; \
+	git switch -q -c "$$branch"; \
+	uv version --bump "$(LEVEL)" --no-sync; \
+	git commit -q -am "chore: bump version to $$version"; \
+	git push -q origin "$$branch"; \
+	gh label create release --color 0E8A16 --description "Merging creates the GitHub release" --force >/dev/null; \
+	gh pr create --base devel --head "$$branch" --label release --title "chore: bump version to $$version" --body-file "$$body"
+
 require-posthog-key:
 	@case "$(DLTHUB_INIT_POSTHOG_KEY)" in \
 		phc_*) ;; \
@@ -145,53 +159,4 @@ lock-check: ## CI guard: fail if the root uv.lock is out of sync with pyproject.
 		exit 1; \
 	fi
 
-scaffold-lock-upgrade: ## Re-resolve the bundled workspace uv.lock (PKG=<name> to bump one); review the diff and commit
-	uv lock $(if $(PKG),--upgrade-package $(PKG),--upgrade) --project $(SCAFFOLD_DIR)
-
-scaffold-lock-check: ## CI guard: fail if the bundled workspace uv.lock is out of sync with its pyproject
-	@echo "scaffold-lock-check: checking $(SCAFFOLD_DIR)/uv.lock against its pyproject.toml…"; \
-	log="$$(mktemp)"; \
-	if uv lock --check --project $(SCAFFOLD_DIR) >"$$log" 2>&1; then \
-		rm -f "$$log"; \
-		echo "scaffold-lock-check: OK — uv.lock is in sync with pyproject.toml."; \
-	else \
-		echo "scaffold-lock-check: FAILED — run 'make scaffold-lock-upgrade' and commit. uv output:"; \
-		cat "$$log"; rm -f "$$log"; \
-		exit 1; \
-	fi
-
-scaffold-deps-sync: ## Sync the bundled workspace deps with dlt's workspace_deps(); review the diff, re-run scaffold-lock-upgrade, and commit
-	uv run python scripts/sync_workspace_deps.py
-
-scaffold-deps-check: ## CI guard: fail if the bundled workspace deps drift from dlt's workspace_deps()
-	uv run python scripts/sync_workspace_deps.py --check
-
-#
-# Skills (pulled from the dltHub AI workbench)
-#
-
-generate-skills: ## Populate skills/ from the dltHub AI workbench at the pinned WORKBENCH_REF
-	uv run python scripts/generate_skills.py
-
-update-skills: ## Bump the workbench ref (REF=<sha>, or latest) and regenerate skills/
-	uv run python scripts/update_skills.py $(REF)
-
-check-skills: ## CI guard: fail if skills/ differs from the generated output
-	@echo "check-skills: regenerating skills/ (output hidden unless it fails)…"; \
-	log="$$(mktemp)"; \
-	if ! uv run python scripts/generate_skills.py >"$$log" 2>&1; then \
-		echo "check-skills: generate-skills failed — its output:"; \
-		cat "$$log"; rm -f "$$log"; exit 1; \
-	fi; \
-	rm -f "$$log"; \
-	changed="$$(git status --porcelain -- skills)"; \
-	if [ -z "$$changed" ]; then \
-		echo "check-skills: OK — skills/ is up to date."; \
-	else \
-		echo "check-skills: FAILED — skills/ differs from 'make generate-skills'; regenerate and commit:"; \
-		printf '%s\n' "$$changed" | sed 's/^/    /'; \
-		git --no-pager diff -- skills; \
-		exit 1; \
-	fi
-
-ci: lint-ci test test-integration lock-check scaffold-lock-check scaffold-deps-check check-skills build ## Run all CI checks locally
+ci: lint-ci test test-integration lock-check build ## Run all CI checks locally

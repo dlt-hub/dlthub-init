@@ -1,336 +1,166 @@
-"""Tests for the telemetry module."""
+import json
+from typing import Any, Callable
+from unittest.mock import MagicMock, call
 
-from __future__ import annotations
-
-import contextlib
-import io
-import os
-import tempfile
-import time
-import unittest
-from pathlib import Path
-from typing import Any, Iterator
-from unittest.mock import MagicMock, patch
+import pytest
 
 from dlthub_init import telemetry
 from dlthub_init.cli import main
-from dlthub_init.errors import CollisionError, WorkspaceError
-
-_OPT_OUT_ENV = ("DLTHUB_INIT_TELEMETRY", "DO_NOT_TRACK", "RUNTIME__DLTHUB_TELEMETRY")
-
-
-@contextlib.contextmanager
-def _silenced() -> Iterator[None]:
-    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        yield
-
-
-@contextlib.contextmanager
-def _clean_opt_out_env() -> Iterator[None]:
-    """Drop every opt-out signal so a test starts from the default-enabled state."""
-    with patch.dict(os.environ, {}, clear=False):
-        for name in _OPT_OUT_ENV:
-            os.environ.pop(name, None)
-        yield
-
-
-class IsEnabledTests(unittest.TestCase):
-    def test_no_telemetry_flag_disables(self) -> None:
-        self.assertFalse(telemetry._is_enabled(True))
-
-    def test_env_zero_disables(self) -> None:
-        with patch.dict(os.environ, {"DLTHUB_INIT_TELEMETRY": "0"}):
-            self.assertFalse(telemetry._is_enabled(False))
-
-    def test_env_one_enables_overriding_dlt(self) -> None:
-        with patch.dict(os.environ, {"DLTHUB_INIT_TELEMETRY": "1"}):
-            self.assertTrue(telemetry._is_enabled(False))
-
-    def test_do_not_track_disables(self) -> None:
-        with _clean_opt_out_env():
-            os.environ["DO_NOT_TRACK"] = "1"
-            self.assertFalse(telemetry._is_enabled(False))
-
-
-class DltOptOutTests(unittest.TestCase):
-    def _is_enabled_with_config(self, contents: str | None) -> bool:
-        with tempfile.TemporaryDirectory() as global_dir:
-            if contents is not None:
-                (Path(global_dir) / "config.toml").write_text(contents, encoding="utf-8")
-            with _clean_opt_out_env(), patch.object(telemetry, "_dlt_global_dir", return_value=Path(global_dir)):
-                return telemetry._is_enabled(False)
-
-    def test_dlt_opt_out_disables(self) -> None:
-        self.assertFalse(self._is_enabled_with_config("[runtime]\ndlthub_telemetry = false\n"))
-
-    def test_dlt_opt_in_enabled(self) -> None:
-        self.assertTrue(self._is_enabled_with_config("[runtime]\ndlthub_telemetry = true\n"))
-
-    def test_no_config_enabled_by_default(self) -> None:
-        self.assertTrue(self._is_enabled_with_config(None))
-
-    def test_non_utf8_config_do_not_crash_cli(self) -> None:
-        with tempfile.TemporaryDirectory() as global_dir:
-            (Path(global_dir) / "config.toml").write_bytes("[runtime]\n".encode("utf-16"))
-            with _clean_opt_out_env(), patch.object(telemetry, "_dlt_global_dir", return_value=Path(global_dir)):
-                self.assertTrue(telemetry._is_enabled(False))
-
-    def test_runtime_env_override_disables(self) -> None:
-        with _clean_opt_out_env():
-            os.environ["RUNTIME__DLTHUB_TELEMETRY"] = "false"
-            self.assertFalse(telemetry._is_enabled(False))
-
-
-class ProjectKeyTests(unittest.TestCase):
-    def test_env_override_wins(self) -> None:
-        with patch.dict(os.environ, {"DLTHUB_INIT_POSTHOG_KEY": "phc_env"}):
-            self.assertEqual(telemetry._project_key(), "phc_env")
-
-    def test_empty_without_baked_key_or_env(self) -> None:
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("DLTHUB_INIT_POSTHOG_KEY", None)
-            self.assertEqual(telemetry._project_key(), "")
-
-    def test_init_is_noop_without_a_key(self) -> None:
-        instance = telemetry._Telemetry()
-        with patch.dict(os.environ, {"DLTHUB_INIT_TELEMETRY": "1"}):
-            os.environ.pop("DLTHUB_INIT_POSTHOG_KEY", None)
-            instance.init(no_telemetry=False)
-        self.assertIsNone(instance._client)
-
-
-class InitTests(unittest.TestCase):
-    def test_init_never_propagates_errors(self) -> None:
-        instance = telemetry._Telemetry()
-        with patch.dict(os.environ, {"DLTHUB_INIT_POSTHOG_KEY": "phc_x"}):
-            with patch.object(telemetry, "_is_enabled", side_effect=ValueError("boom")):
-                instance.init(no_telemetry=False)  # must not raise
-        self.assertIsNone(instance._client)
-
-
-class DeviceIdTests(unittest.TestCase):
-    def test_creates_hex_id_when_absent(self) -> None:
-        with tempfile.TemporaryDirectory() as global_dir:
-            with patch.object(telemetry, "_dlt_global_dir", return_value=Path(global_dir)):
-                device_id = telemetry._device_id()
-        self.assertEqual(len(device_id), 32)
-        int(device_id, 16)  # raises if not hex
-
-    def test_reads_existing_id(self) -> None:
-        with tempfile.TemporaryDirectory() as global_dir:
-            (Path(global_dir) / ".anonymous_id").write_text("existing-id", encoding="utf-8")
-            with patch.object(telemetry, "_dlt_global_dir", return_value=Path(global_dir)):
-                self.assertEqual(telemetry._device_id(), "existing-id")
-
-    def test_persists_stable_id_without_newline(self) -> None:
-        with tempfile.TemporaryDirectory() as global_dir:
-            with patch.object(telemetry, "_dlt_global_dir", return_value=Path(global_dir)):
-                first = telemetry._device_id()
-                second = telemetry._device_id()
-            stored = (Path(global_dir) / ".anonymous_id").read_text(encoding="utf-8")
-        self.assertEqual(first, second)
-        self.assertEqual(stored, first)
-
-
-@contextlib.contextmanager
-def _global_dir_env(home: str, **overrides: str) -> Iterator[None]:
-    with patch.object(telemetry.os.path, "expanduser", return_value=home):
-        with patch.dict(os.environ, {}, clear=False):
-            for name in ("XDG_DATA_HOME", "DLT_CONFIG_FOLDER", "DLT_DATA_DIR"):
-                os.environ.pop(name, None)
-            os.environ.update(overrides)
-            yield
-
-
-_XDG_HOME = "/xdg-data-home"
-
-_GLOBAL_DIR_CASES = [
-    ("home default when no XDG", {}, None, lambda home: home / ".dlt"),
-    ("XDG used when ~/.dlt absent", {"XDG_DATA_HOME": _XDG_HOME}, None, lambda home: Path(_XDG_HOME) / "dlt"),
-    ("XDG ignored when ~/.dlt present", {"XDG_DATA_HOME": _XDG_HOME}, ".dlt", lambda home: home / ".dlt"),
-    ("DLT_CONFIG_FOLDER renames the home folder", {"DLT_CONFIG_FOLDER": ".cfg"}, None, lambda home: home / ".cfg"),
-    (
-        "DLT_CONFIG_FOLDER drives the XDG existence check",
-        {"XDG_DATA_HOME": _XDG_HOME, "DLT_CONFIG_FOLDER": ".cfg"},
-        None,
-        lambda home: Path(_XDG_HOME) / "dlt",
-    ),
-    (
-        "DLT_CONFIG_FOLDER folder present beats XDG",
-        {"XDG_DATA_HOME": _XDG_HOME, "DLT_CONFIG_FOLDER": ".cfg"},
-        ".cfg",
-        lambda home: home / ".cfg",
-    ),
-    ("DLT_DATA_DIR is ignored", {"DLT_DATA_DIR": "/data-dir"}, None, lambda home: home / ".dlt"),
-]
-
-
-class GlobalDirTests(unittest.TestCase):
-    def setUp(self) -> None:
-        if hasattr(os, "geteuid") and os.geteuid() == 0:
-            self.skipTest("resolution differs for root")
-
-    def test_resolution_matrix(self) -> None:
-        for label, env, precreate, expected in _GLOBAL_DIR_CASES:
-            with self.subTest(label):
-                with tempfile.TemporaryDirectory() as home:
-                    if precreate:
-                        (Path(home) / precreate).mkdir()
-                    with _global_dir_env(home, **env):
-                        self.assertEqual(telemetry._dlt_global_dir(), expected(Path(home)))
-
-    def test_temp_fallback_when_home_unresolved(self) -> None:
-        with _global_dir_env("~"):
-            self.assertEqual(telemetry._dlt_global_dir(), Path(tempfile.gettempdir()) / "dlt")
-
-    def test_temp_fallback_when_home_unwritable(self) -> None:
-        with tempfile.TemporaryDirectory() as home:
-            with _global_dir_env(home), patch.object(telemetry, "_is_writable", return_value=False):
-                self.assertEqual(telemetry._dlt_global_dir(), Path(tempfile.gettempdir()) / "dlt")
-
-
-class CiDetectionTests(unittest.TestCase):
-    def test_detects_ci(self) -> None:
-        with patch.dict(os.environ, {"CI": "true"}):
-            self.assertTrue(telemetry._is_ci())
-
-    def test_no_ci(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
-            self.assertFalse(telemetry._is_ci())
-
-
-class EventShapeTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.client = MagicMock()
-        self.t = telemetry._Telemetry()
-        self.t._client = self.client
-        self.t._distinct_id = "device-123"
-        self.t._base = telemetry._base_properties("device-123")
-        self.t._started_at = time.monotonic()
-
-    def _kwargs(self) -> dict[str, Any]:
-        return self.client.capture.call_args.kwargs
-
-    def test_track_run_emits_taxonomy_event(self) -> None:
-        self.t.track_run("success")
-        kwargs = self._kwargs()
-        self.assertEqual(kwargs["event"], "visitor:run:uvx_command")
-        self.assertEqual(kwargs["distinct_id"], "device-123")
-        self.assertIn("uuid", kwargs)  # dedup id
-        self.assertIn("timestamp", kwargs)  # server-side event time
-        props = kwargs["properties"]
-        self.assertEqual(props["actor_type"], "visitor")
-        self.assertEqual(props["actor_id"], "device-123")
-        self.assertEqual(props["object_type"], "uvx_command")
-        self.assertEqual(props["object_id"], "dlthub-init")
-        self.assertEqual(props["context"], "uvx-init")
-        self.assertEqual(props["source"], "uvx")
-        self.assertEqual(props["device_id"], "device-123")
-        self.assertEqual(props["cli_version"], telemetry.VERSION)
-        self.assertIn("session_id", props)
-
-    def test_track_run_success(self) -> None:
-        self.t.track_run("success")
-        props = self._kwargs()["properties"]
-        self.assertEqual(props["status"], "success")
-        self.assertIn("duration_ms", props)
-        self.assertNotIn("error_code", props)
-
-    def test_track_run_failed_carries_error_code(self) -> None:
-        self.t.track_run("failed", error_code="WorkspaceError")
-        props = self._kwargs()["properties"]
-        self.assertEqual(props["status"], "failed")
-        self.assertEqual(props["error_code"], "WorkspaceError")
-
-    def test_track_run_cancelled_drops_error_code(self) -> None:
-        self.t.track_run("cancelled", error_code="KeyboardInterrupt")
-        props = self._kwargs()["properties"]
-        self.assertEqual(props["status"], "cancelled")
-        self.assertNotIn("error_code", props)
-
-    def test_track_run_emits_once(self) -> None:
-        self.t.track_run("success")
-        self.t.track_run("failed", error_code="X")
-        self.client.capture.assert_called_once()
-
-    def test_track_run_is_noop_when_disabled(self) -> None:
-        self.t._client = None
-        self.t.track_run("success")
-
-    def test_track_run_swallows_client_errors(self) -> None:
-        self.client.capture.side_effect = RuntimeError("network down")
-        self.t.track_run("success")
-
-
-class MainWiringTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.track_run = patch("dlthub_init.telemetry.track_run").start()
-        patch("dlthub_init.telemetry.init").start()
-        self.cli_run = patch("dlthub_init.cli.run").start()
-        self.addCleanup(patch.stopall)
-
-    def _main(self) -> int:
-        with _silenced():
-            return main([])
-
-    def test_success_path(self) -> None:
-        rc = self._main()
-        self.assertEqual(rc, 0)
-        self.track_run.assert_called_once_with("success")
-
-    def test_cancelled_path(self) -> None:
-        self.cli_run.side_effect = KeyboardInterrupt()
-        rc = self._main()
-        self.assertEqual(rc, 130)
-        self.track_run.assert_called_once_with("cancelled")
-
-    def test_workspace_error_path(self) -> None:
-        self.cli_run.side_effect = WorkspaceError("boom")
-        rc = self._main()
-        self.assertEqual(rc, 1)
-        self.track_run.assert_called_once_with("failed", error_code="WorkspaceError")
-
-    def test_unexpected_error_path(self) -> None:
-        self.cli_run.side_effect = RuntimeError("kaboom")
-        rc = self._main()
-        self.assertEqual(rc, 1)
-        self.track_run.assert_called_once_with("failed", error_code="RuntimeError")
-
-    def test_collision_path(self) -> None:
-        self.cli_run.side_effect = CollisionError([".dlt/.workspace"])
-        rc = self._main()
-        self.assertEqual(rc, 2)
-        self.track_run.assert_called_once_with("failed", error_code="CollisionError")
-
-
-class FirstRunNoticeTests(unittest.TestCase):
-    def test_shows_notice_only_once(self) -> None:
-        with tempfile.TemporaryDirectory() as global_dir:
-            with patch.object(telemetry, "_dlt_global_dir", return_value=Path(global_dir)):
-                with patch.object(telemetry.console, "print") as printer:
-                    telemetry._show_first_run_notice()
-                    telemetry._show_first_run_notice()
-        printer.assert_called_once()
-
-    def test_method_is_noop_when_telemetry_disabled(self) -> None:
-        t = telemetry._Telemetry()
-        with patch.object(telemetry, "_show_first_run_notice") as notice:
-            t.show_first_run_notice()
-        notice.assert_not_called()
-
-    def test_method_shows_notice_when_active(self) -> None:
-        t = telemetry._Telemetry()
-        t._client = MagicMock()
-        with patch.object(telemetry, "_show_first_run_notice") as notice:
-            t.show_first_run_notice()
-        notice.assert_called_once()
-
-    def test_method_never_propagates_errors(self) -> None:
-        t = telemetry._Telemetry()
-        t._client = MagicMock()
-        with patch.object(telemetry, "_show_first_run_notice", side_effect=ValueError("boom")):
-            t.show_first_run_notice()
-
-
-if __name__ == "__main__":
-    unittest.main()
+from dlthub_init.errors import DlthubCommandError, WorkspaceError
+
+
+@pytest.fixture
+def env(monkeypatch) -> Callable[..., None]:
+    """Sets a PostHog key. Call it to set more variables."""
+    monkeypatch.setenv("DLTHUB_INIT_POSTHOG_KEY", "phc_test")
+
+    def set_env(**values: str) -> None:
+        for name, value in values.items():
+            monkeypatch.setenv(name, value)
+
+    return set_env
+
+
+@pytest.fixture
+def urlopen(monkeypatch, env) -> MagicMock:
+    """Turns telemetry on and records the requests instead of sending them."""
+    opened = MagicMock()
+    monkeypatch.setattr(telemetry.urllib.request, "urlopen", opened)
+    monkeypatch.setattr(telemetry, "get_anonymous_id", lambda: "device-123")
+    monkeypatch.setattr(telemetry, "_enabled", True)
+    return opened
+
+
+def sent_event(urlopen: MagicMock) -> dict[str, Any]:
+    request = urlopen.call_args.args[0]
+    assert request.full_url == f"{telemetry.POSTHOG_HOST}/i/v0/e/"
+    event: dict[str, Any] = json.loads(request.data)
+    return event
+
+
+@pytest.mark.parametrize(
+    "no_telemetry,env_vars,opted_out",
+    [
+        pytest.param(True, {}, True, id="no-telemetry-flag"),
+        pytest.param(False, {}, False, id="default"),
+        pytest.param(False, {"DLTHUB_INIT_TELEMETRY": "0"}, True, id="tool-opt-out"),
+        pytest.param(False, {"DLTHUB_INIT_TELEMETRY": "1", "DO_NOT_TRACK": "1"}, False, id="tool-opt-in-wins"),
+        pytest.param(False, {"DO_NOT_TRACK": "1"}, True, id="do-not-track"),
+        # dlt's opt-out turns off only this tool's event, not dlt's own telemetry
+        pytest.param(False, {"RUNTIME__DLTHUB_TELEMETRY": "false"}, False, id="dlt-opt-out"),
+    ],
+)
+def test_is_opted_out(env, no_telemetry: bool, env_vars: dict[str, str], opted_out: bool) -> None:
+    env(**env_vars)
+    assert telemetry.is_opted_out(no_telemetry) is opted_out
+
+
+@pytest.mark.parametrize(
+    "no_telemetry,env_vars,enabled",
+    [
+        pytest.param(False, {"RUNTIME__DLTHUB_TELEMETRY": "true"}, True, id="dlt-opt-in"),
+        pytest.param(False, {"RUNTIME__DLTHUB_TELEMETRY": "false"}, False, id="dlt-opt-out"),
+        pytest.param(True, {"RUNTIME__DLTHUB_TELEMETRY": "true"}, False, id="no-telemetry-flag"),
+        pytest.param(
+            False,
+            {"DLTHUB_INIT_TELEMETRY": "1", "RUNTIME__DLTHUB_TELEMETRY": "false"},
+            True,
+            id="tool-opt-in-beats-dlt-opt-out",
+        ),
+        pytest.param(
+            False, {"DLTHUB_INIT_POSTHOG_KEY": "", "RUNTIME__DLTHUB_TELEMETRY": "true"}, False, id="no-posthog-key"
+        ),
+    ],
+)
+def test_is_enabled(env, no_telemetry: bool, env_vars: dict[str, str], enabled: bool) -> None:
+    env(**env_vars)
+    assert telemetry._is_enabled(no_telemetry) is enabled
+
+
+def test_disabled_when_dlt_config_fails(env, monkeypatch) -> None:
+    monkeypatch.setattr(telemetry, "resolve_configuration", MagicMock(side_effect=ValueError("bad toml")))
+    assert telemetry._is_enabled(False) is False
+
+
+def test_sends_one_event(urlopen) -> None:
+    telemetry.track_run("success")
+    event = sent_event(urlopen)
+    assert event["api_key"] == "phc_test"
+    assert event["event"] == telemetry.EVENT_NAME
+    assert event["distinct_id"] == "device-123"
+    props = event["properties"]
+    assert props["object_id"] == "dlthub-init"
+    assert props["device_id"] == "device-123"
+    assert props["status"] == "success"
+    assert props["$geoip_disable"] is True
+    assert "error_code" not in props
+
+
+def test_failed_run_carries_error_and_added_properties(urlopen) -> None:
+    telemetry.add_properties(dlt_version="1.33.0", failed_step="init")
+    telemetry.track_run("failed", error_code="DlthubCommandError")
+    props = sent_event(urlopen)["properties"]
+    assert props["error_code"] == "DlthubCommandError"
+    assert props["dlt_version"] == "1.33.0"
+    assert props["failed_step"] == "init"
+
+
+def test_sends_nothing_when_disabled(urlopen, monkeypatch) -> None:
+    monkeypatch.setattr(telemetry, "_enabled", False)
+    telemetry.track_run("success")
+    urlopen.assert_not_called()
+
+
+def test_no_telemetry_run_sends_nothing(urlopen, monkeypatch) -> None:
+    monkeypatch.setattr("dlthub_init.cli.run", MagicMock())
+    assert main(["--no-telemetry"]) == 0
+    urlopen.assert_not_called()
+
+
+def test_swallows_network_errors(urlopen) -> None:
+    urlopen.side_effect = OSError("network down")
+    telemetry.track_run("success")
+
+
+def test_notice_shown_once_and_only_when_enabled(env, monkeypatch, tmp_path) -> None:
+    env(RUNTIME__DLTHUB_TELEMETRY="true")
+    monkeypatch.setattr(telemetry.run_context, "active", lambda: MagicMock(global_dir=str(tmp_path)))
+    printer = MagicMock()
+    monkeypatch.setattr(telemetry.console, "print", printer)
+    telemetry.init(no_telemetry=True)
+    printer.assert_not_called()
+    telemetry.init(no_telemetry=False)
+    telemetry.init(no_telemetry=False)
+    printer.assert_called_once()
+
+
+def test_notice_errors_do_not_propagate(env, monkeypatch) -> None:
+    env(RUNTIME__DLTHUB_TELEMETRY="true")
+    monkeypatch.setattr(telemetry.run_context, "active", MagicMock(side_effect=RuntimeError("boom")))
+    telemetry.init(no_telemetry=False)
+
+
+@pytest.mark.parametrize(
+    "raised,exit_code,tracked",
+    [
+        pytest.param(None, 0, call("success"), id="success"),
+        pytest.param(KeyboardInterrupt(), 130, call("cancelled"), id="cancelled"),
+        pytest.param(WorkspaceError("boom"), 1, call("failed", error_code="WorkspaceError"), id="workspace-error"),
+        pytest.param(RuntimeError("kaboom"), 1, call("failed", error_code="RuntimeError"), id="unexpected-error"),
+        pytest.param(
+            DlthubCommandError("ai init", 2), 2, call("failed", error_code="DlthubCommandError"), id="dlthub-failed"
+        ),
+    ],
+)
+def test_main_tracks_the_outcome(monkeypatch, raised: BaseException | None, exit_code: int, tracked) -> None:
+    track_run = MagicMock()
+    monkeypatch.setattr(telemetry, "track_run", track_run)
+    monkeypatch.setattr("dlthub_init.cli.run", MagicMock(side_effect=raised))
+    assert main([]) == exit_code
+    assert track_run.call_args_list == [tracked]
+
+
+def test_main_tracks_the_failed_step(monkeypatch) -> None:
+    monkeypatch.setattr("dlthub_init.cli.run", MagicMock(side_effect=DlthubCommandError("ai init", 2)))
+    main([])
+    assert telemetry._properties["failed_step"] == "ai init"

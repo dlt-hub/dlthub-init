@@ -1,18 +1,21 @@
-"""Usage telemetry for the dlthub-init CLI."""
+"""Usage telemetry for the dlthub-init CLI: one PostHog event per run."""
 
 from __future__ import annotations
 
-import atexit
-import logging
+import json
 import os
 import secrets
-import tempfile
 import time
-import tomllib
-import uuid
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
+
+from dlt.common.configuration import resolve_configuration
+from dlt.common.configuration.specs import RuntimeConfiguration
+from dlt.common.runtime import run_context
+from dlt.common.runtime.anon_tracker import get_anonymous_id
+from dlt.common.runtime.exec_info import in_continuous_integration
 
 from . import strings
 from .config import POSTHOG_HOST, VERSION
@@ -23,202 +26,115 @@ try:
 except (ImportError, SyntaxError):
     POSTHOG_PROJECT_KEY = ""
 
-
 EVENT_NAME = "visitor:run:uvx_command"
-_ACTOR_TYPE = "visitor"
-_OBJECT_TYPE = "uvx_command"
-_OBJECT_ID = "dlthub-init"
-_CONTEXT = "uvx-init"
-_SOURCE = "uvx"
 
 RunStatus = Literal["success", "failed", "cancelled"]
 
 _REQUEST_TIMEOUT_SECONDS = 3
-_ANONYMOUS_ID_FILE = ".anonymous_id"
 _NOTICE_MARKER_FILE = ".dlthub_init_telemetry_notice"
 _TRUTHY = {"1", "true", "yes", "on"}
+_STARTED_AT = time.monotonic()
+
+_enabled = False
+_properties: dict[str, object] = {}
 
 
-class _Telemetry:
-    def __init__(self) -> None:
-        self._client: Any = None
-        self._distinct_id = ""
-        self._base: dict[str, object] = {}
-        self._started_at = 0.0
-        self._emitted = False
-
-    def init(self, *, no_telemetry: bool) -> None:
-        """Start the telemetry client once per process, unless the user opted out."""
-        if self._client is not None:
-            return
-        try:
-            key = _project_key()
-            if not key or not _is_enabled(no_telemetry):
-                return
-            # lazy import to speed up the disabled paths
-            import posthog  # noqa: PLC0415
-
-            self._distinct_id = _device_id()
-            self._base = _base_properties(self._distinct_id)
-            self._started_at = time.monotonic()
-            _silence_posthog_logging()
-            self._client = posthog.Posthog(
-                key,
-                host=_host(),
-                max_retries=0,
-                timeout=_REQUEST_TIMEOUT_SECONDS,
-                disable_geoip=True,
-            )
-            atexit.register(self.shutdown)
-        except Exception:
-            self._client = None
-
-    def show_first_run_notice(self) -> None:
-        if self._client is None:
-            return
+def init(*, no_telemetry: bool) -> None:
+    """Turn on the event of this run unless the user or dlt opted out, and show the notice once."""
+    global _enabled
+    _enabled = _is_enabled(no_telemetry)
+    if _enabled:
         try:
             _show_first_run_notice()
         except Exception:
             pass
 
-    def track_run(self, status: RunStatus, error_code: str | None = None) -> None:
-        if self._emitted:
-            return
-        self._emitted = True
-        self._emit(status, error_code)
 
-    def _emit(self, status: RunStatus, error_code: str | None = None) -> None:
-        if self._client is None:
-            return
-        properties: dict[str, object] = {
-            **self._base,
-            "status": status,
-            "duration_ms": self.elapsed_ms(),
-        }
-        if error_code is not None and status == "failed":
-            properties["error_code"] = error_code
-        try:
-            self._client.capture(
-                event=EVENT_NAME,
-                distinct_id=self._distinct_id,
-                properties=properties,
-                timestamp=datetime.now(tz=timezone.utc),
-                uuid=str(uuid.uuid4()),
-            )
-        except Exception:
-            pass
-
-    def elapsed_ms(self) -> int:
-        """Milliseconds since the run started."""
-        return int((time.monotonic() - self._started_at) * 1000)
-
-    def shutdown(self) -> None:
-        """Flush queued events on exit."""
-        client, self._client = self._client, None
-        if client is None:
-            return
-        try:
-            client.flush()
-        except Exception:
-            pass
-
-
-_telemetry = _Telemetry()
-
-
-def init(*, no_telemetry: bool) -> None:
-    _telemetry.init(no_telemetry=no_telemetry)
-
-
-def show_first_run_notice() -> None:
-    _telemetry.show_first_run_notice()
+def add_properties(**properties: object) -> None:
+    """Add properties to the event of this run."""
+    _properties.update(properties)
 
 
 def track_run(status: RunStatus, error_code: str | None = None) -> None:
-    _telemetry.track_run(status, error_code)
+    """Send the event of this run. Never raises."""
+    if not _enabled:
+        return
+    try:
+        _send(status, error_code)
+    except Exception:
+        pass
+
+
+def is_opted_out(no_telemetry: bool) -> bool:
+    """True when the user turned telemetry off for this run, so dlt's telemetry goes off too."""
+    if no_telemetry:
+        return True
+    explicit = os.environ.get("DLTHUB_INIT_TELEMETRY")
+    if explicit is not None:
+        return not _is_truthy(explicit)
+    return _is_truthy(os.environ.get("DO_NOT_TRACK"))
 
 
 def _is_enabled(no_telemetry: bool) -> bool:
-    if no_telemetry:
+    if not _project_key() or is_opted_out(no_telemetry):
         return False
-    explicit = os.environ.get("DLTHUB_INIT_TELEMETRY")
-    if explicit is not None:
-        return _is_truthy(explicit)
-    if _is_truthy(os.environ.get("DO_NOT_TRACK")):
-        return False
-    return _dlt_telemetry_enabled()
-
-
-def _dlt_telemetry_enabled() -> bool:
-    """Honor an existing dlt opt-out."""
-    override = os.environ.get("RUNTIME__DLTHUB_TELEMETRY")
-    if override is not None:
-        return _is_truthy(override)
-    try:
-        config = tomllib.loads((_dlt_global_dir() / "config.toml").read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+    # an explicit opt-in overrides dlt's opt-out
+    if os.environ.get("DLTHUB_INIT_TELEMETRY") is not None:
         return True
-    runtime = config.get("runtime")
-    return not (isinstance(runtime, dict) and runtime.get("dlthub_telemetry") is False)
+    try:
+        return resolve_configuration(RuntimeConfiguration()).dlthub_telemetry
+    except Exception:
+        return False
+
+
+def _send(status: RunStatus, error_code: str | None) -> None:
+    device_id = get_anonymous_id()
+    properties: dict[str, object] = {
+        "actor_type": "visitor",
+        "actor_id": device_id,
+        "object_type": "uvx_command",
+        "object_id": "dlthub-init",
+        "context": "uvx-init",
+        "source": "uvx",
+        "device_id": device_id,
+        "session_id": secrets.token_hex(16),
+        "cli_version": VERSION,
+        "ci": in_continuous_integration(),
+        "status": status,
+        "duration_ms": int((time.monotonic() - _STARTED_AT) * 1000),
+        "$geoip_disable": True,
+        **_properties,
+    }
+    if error_code is not None:
+        properties["error_code"] = error_code
+    event = {
+        "api_key": _project_key(),
+        "event": EVENT_NAME,
+        "distinct_id": device_id,
+        "properties": properties,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    request = urllib.request.Request(
+        f"{_host()}/i/v0/e/",
+        data=json.dumps(event).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS):
+        pass
+
+
+def _show_first_run_notice() -> None:
+    marker = Path(run_context.active().global_dir) / _NOTICE_MARKER_FILE
+    if marker.exists():
+        return
+    console.print(strings.MSG_TELEMETRY_NOTICE)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
 
 
 def _is_truthy(value: str | None) -> bool:
     return value is not None and value.strip().lower() in _TRUTHY
-
-
-def _device_id() -> str:
-    """Read, or create, the dlt device id."""
-    path = _dlt_global_dir() / _ANONYMOUS_ID_FILE
-    try:
-        existing = path.read_text(encoding="utf-8").strip()
-    except OSError:
-        existing = ""
-    if existing:
-        return existing
-    device_id = secrets.token_hex(16)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(device_id, encoding="utf-8")
-    except OSError:
-        pass
-    return device_id
-
-
-def _dlt_global_dir() -> Path:
-    """Resolve dlt's global directory."""
-    if hasattr(os, "geteuid") and os.geteuid() == 0:
-        return Path("/var") / "dlt"
-    home = os.path.expanduser("~")
-    if home == "~" or not _is_writable(Path(home)):
-        return Path(tempfile.gettempdir()) / "dlt"
-    dot_dlt = os.environ.get("DLT_CONFIG_FOLDER", ".dlt")
-    xdg = os.environ.get("XDG_DATA_HOME")
-    if xdg and not (Path(home) / dot_dlt).is_dir():
-        return Path(xdg) / "dlt"
-    return Path(home) / dot_dlt
-
-
-def _is_writable(path: Path) -> bool:
-    return path.is_dir() and os.access(path, os.W_OK)
-
-
-def _base_properties(device_id: str) -> dict[str, object]:
-    return {
-        "actor_type": _ACTOR_TYPE,
-        "actor_id": device_id,
-        "object_type": _OBJECT_TYPE,
-        "object_id": _OBJECT_ID,
-        "context": _CONTEXT,
-        "source": _SOURCE,
-        "device_id": device_id,
-        "session_id": secrets.token_hex(16),
-        "cli_version": VERSION,
-        "ci": _is_ci(),
-    }
-
-
-def _is_ci() -> bool:
-    return bool(os.environ.get("CI"))
 
 
 def _project_key() -> str:
@@ -227,21 +143,3 @@ def _project_key() -> str:
 
 def _host() -> str:
     return os.environ.get("DLTHUB_INIT_POSTHOG_HOST") or POSTHOG_HOST
-
-
-def _silence_posthog_logging() -> None:
-    posthog_logger = logging.getLogger("posthog")
-    posthog_logger.addHandler(logging.NullHandler())
-    posthog_logger.propagate = False
-
-
-def _show_first_run_notice() -> None:
-    marker = _dlt_global_dir() / _NOTICE_MARKER_FILE
-    if marker.exists():
-        return
-    console.print(strings.MSG_TELEMETRY_NOTICE)
-    try:
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.touch()
-    except OSError:
-        pass

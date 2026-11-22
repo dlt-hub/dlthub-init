@@ -1,0 +1,5 @@
+# the generated release notes leave out the version bump pull requests
+changelog:
+  exclude:
+    labels:
+      - release

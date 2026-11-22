@@ -15,3 +15,5 @@ src/dlthub_init/_telemetry_key.py
 
 # Local release secrets loaded by the Makefile (e.g. DLTHUB_INIT_POSTHOG_KEY)
 .make.env
+
+.claude/settings.local.json
