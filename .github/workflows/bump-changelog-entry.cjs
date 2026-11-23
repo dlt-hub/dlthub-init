@@ -91,6 +91,19 @@ function directSpecs(text) {
 }
 
 /**
+ * The packages a bump watches, named in the entry whether or not a pyproject holds them.
+ *
+ * `lockBullet` names a direct dependency and counts a transitive, which is the shape of every
+ * released entry. A package the whole bump exists for can be transitive: one scaffold depends
+ * on `dlthub-client` by name and another reaches it through `dlt[hub]`, so without this the
+ * one package a reader is looking for is counted among the three hundred nobody reads.
+ */
+function alsoNamed(value) {
+  return new Set(String(value || '').split(',')
+    .map((n) => n.trim()).filter(Boolean).map(normalise));
+}
+
+/**
  * The skills a `skills/` directory holds, or null where the caller named no such directory.
  *
  * A skill is one directory: `.gitkeep` and anything else loose beside them is not one. Null
@@ -107,23 +120,25 @@ function skillNames(dir) {
 
 const versions = (list) => list.map((p) => `\`${p.name}\` ${p.from} → ${p.to}`);
 
-// How each of the four bullets opens. A second bump finds the first one's lines by these, so
-// rewording one here is what rewords it everywhere, and a line a person wrote is left alone
-// because it opens with something else
+// How each bullet opens. A second bump finds the first one's lines by these, so rewording one
+// here is what rewords it everywhere, and a line a person wrote is left alone because it opens
+// with something else
 const LEADS = {
   scaffold: 'Refreshed the bundled minimal workspace `uv.lock` to the latest'
     + ' within-constraint versions',
   root: 'Refreshed the root `uv.lock` to the latest within-constraint versions',
   deps: "Synced the bundled minimal workspace dependencies with dlt's `workspace_deps()`",
   skills: 'Refreshed the bundled skills to workbench',
+  session: 'Re-stamped the bundled notebook session snapshot to marimo',
 };
 
 /** Whether a changelog line is a bullet an earlier run of this script wrote. */
 const isOwnBullet = (line) => Object.values(LEADS).some((lead) => line.startsWith(`- ${lead}`));
 
 /** The `LEADS` keys a run was given both sides of, which are the bullets it may replace. */
-function askedAbout({ scaffold, root, deps, skills }) {
-  return Object.keys(LEADS).filter((kind) => ({ scaffold, root, deps, skills })[kind]);
+function askedAbout({ scaffold, root, deps, skills, session }) {
+  const given = { scaffold, root, deps, skills, session };
+  return Object.keys(LEADS).filter((kind) => given[kind]);
 }
 
 /** "a", "a and b", "a, b and c" — the last separator is the one a reader expects. */
@@ -170,7 +185,9 @@ function lockBullet({ lead, diff, direct }) {
   return `- ${parts.join('')}.`;
 }
 
-function renderEntry({ scaffold, root, direct, rootDirect = null, deps = null, skills = null }) {
+function renderEntry({
+  scaffold, root, direct, rootDirect = null, deps = null, skills = null, session = null,
+}) {
   const bullets = [];
   if (scaffold && scaffold.moved.length + scaffold.added.length + scaffold.removed.length) {
     bullets.push(lockBullet({ lead: LEADS.scaffold, diff: scaffold, direct }));
@@ -199,6 +216,13 @@ function renderEntry({ scaffold, root, direct, rootDirect = null, deps = null, s
     }
     const tail = said.length ? `, ${said.join(', ')}` : '';
     bullets.push(`- ${LEADS.skills} \`${skills.to}\`${tail}.`);
+  }
+  // The snapshot records the marimo version its cell outputs were built with, and a `marimo`
+  // pin past it drops those outputs back to a live kernel run on every launch. The version
+  // pair is in the lock bullet already where the scaffold names `marimo` directly, so this
+  // names what the snapshot was stamped to and not what it came from.
+  if (session && session.from !== session.to) {
+    bullets.push(`- ${LEADS.session} \`${session.to}\`.`);
   }
   return bullets;
 }
@@ -249,7 +273,16 @@ function main(argv, io = console) {
     ? diffLocks(parseLock(read(before)), parseLock(read(after)))
     : null);
 
+  // The watched names go into both sets: which of the two locks a package turns up in does
+  // not decide whether a reader wants it named.
+  const also = alsoNamed(value('--also-name'));
   const direct = directNames(read(value('--direct')));
+  const rootDirect = value('--root-direct') ? directNames(read(value('--root-direct'))) : null;
+  for (const name of also) {
+    direct.add(name);
+    if (rootDirect) rootDirect.add(name);
+  }
+
   const depsBefore = value('--deps-before');
   const depsAfter = value('--deps-after');
   let deps = null;
@@ -263,6 +296,8 @@ function main(argv, io = console) {
         .sort().map((name) => ({ name, from: was.get(name), to: now.get(name) })),
     };
   }
+  const sessionFrom = value('--session-before');
+  const sessionTo = value('--session-after');
   const skillsFrom = value('--skills-before');
   const skillsTo = value('--skills-after');
   const skillDirs = [value('--skills-dir-before'), value('--skills-dir-after')];
@@ -282,9 +317,10 @@ function main(argv, io = console) {
     scaffold: lockDiff(value('--scaffold-before'), value('--scaffold-after')),
     root: lockDiff(value('--root-before'), value('--root-after')),
     direct,
-    rootDirect: value('--root-direct') ? directNames(read(value('--root-direct'))) : null,
+    rootDirect,
     deps,
     skills: skillsFrom && skillsTo ? { from: skillsFrom, to: skillsTo, ...skillDiff } : null,
+    session: sessionFrom && sessionTo ? { from: sessionFrom, to: sessionTo } : null,
   };
   const bullets = renderEntry(entry);
 
@@ -315,5 +351,5 @@ if (require.main === module) process.exit(main(process.argv.slice(2)));
 
 module.exports = {
   LEADS, isOwnBullet, askedAbout, parseLock, normalise, diffLocks, directNames, directSpecs,
-  skillNames, lockBullet, renderEntry, insertEntry, main,
+  alsoNamed, skillNames, lockBullet, renderEntry, insertEntry, main,
 };

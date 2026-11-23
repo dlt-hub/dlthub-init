@@ -208,6 +208,52 @@ jobs:
           # `git status`: the recipe has just rewritten the files those targets compare
           # against the index. `make ci` runs them, after the commit below
 
+      # A package resolved at two versions under per-package `resolution-markers` installs
+      # the older one for whoever the markers select, which nobody reads off a lock of a few
+      # thousand lines. It is refused rather than reported: which Python version the bundled
+      # workspace stops claiming is a person's call.
+      #
+      # The bundled lock alone. The root lock is this tool's own environment, where
+      # supporting an older Python is a choice already made and a fork is the resolver
+      # carrying it out.
+      - name: Refuse a bundled lock that forked a package
+        if: steps.decide.outputs.bump == 'true'
+        run: |
+          set -euo pipefail
+          printf '%s\n' "checking the bundled lock for a forked package" > /tmp/bump-failed-step
+
+          # `[[package]]` names are the only ones at the start of a line: a dependency is an
+          # inline table inside an array and a wheel carries a url rather than a name
+          forked=$(grep '^name = ' "${SCAFFOLD}/uv.lock" | sort | uniq -d \
+            | sed 's/^name = "//; s/"$//')
+          if [ -z "$forked" ]; then
+            echo "::notice::every package in the bundled lock resolves to one version."
+            rm -f /tmp/bump-failed-step
+            exit 0
+          fi
+
+          {
+            echo "The bundled workspace lock resolves these packages at more than one version:"
+            echo
+            for pkg in $forked; do
+              versions=$(awk -v p="$pkg" '
+                $0 == "name = \"" p "\"" { want=1; next }
+                want && /^version = / { gsub(/^version = "|"$/, ""); print; want=0 }
+              ' "${SCAFFOLD}/uv.lock" | paste -sd, - | sed 's/,/, /g')
+              echo "  ${pkg}: ${versions}"
+            done
+            echo
+            echo "A workspace installs the older one wherever the newer release has dropped a"
+            echo "Python version that is still claimed in requires-python here:"
+            echo
+            echo "  ${SCAFFOLD}/pyproject.toml"
+            echo
+            echo "Narrowing that is the fix, and it is a person's call."
+          } > /tmp/bump-failed-log
+          cat /tmp/bump-failed-log
+          echo "::error::the bundled lock forked $(echo "$forked" | paste -sd, - | sed 's/,/, /g')"
+          exit 1
+
       - name: Write the changelog entry
         id: entry
         if: steps.decide.outputs.bump == 'true'
