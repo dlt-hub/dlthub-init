@@ -1,16 +1,12 @@
 # Installed by the engineering agent loop. Edit it in dlt-hub/engineering-agent-loop, not
-# here. Prepares the dependency bump this repository gets after a `dlt`, `dlthub` or
-# `dlthub-client` release and opens a pull request for review. No model is called.
+# here. Refreshes the dependency locks this repository ships after a `dlt`, `dlthub` or
+# `dlthub-client` release and opens a pull request. No model is called.
 #
-# PyPI is the trigger because the lock resolves from the index. A release event is not
-# reliably behind the upload and cannot cross repositories without a credential there.
-#
-# Releasing stays a person's act: `make publish` prompts for a PyPI token on a TTY.
+# The schedule polls PyPI because a release event is not reliably behind the upload.
 name: bump-dlthub-init
 
 on:
   schedule:
-    # a release reaches the index at no particular minute
     - cron: '23 * * * *'
   workflow_dispatch:
     inputs:
@@ -33,7 +29,6 @@ concurrency:
 
 env:
   SCAFFOLD: src/dlthub_init/scaffolds/minimal_workspace
-  # read by the step that commits and by the step that pushes
   BRANCH: chore/bump-scaffold-${{ github.run_id }}
   # everything else in the lock moves as a transitive of these three
   WATCHED: dlt dlthub dlthub-client
@@ -53,8 +48,8 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           token: ${{ steps.app-token.outputs.token }}
-          # the changelog entry is written against the last release tag, and a shallow clone
-          # carries no tag to describe
+          # the entry is written against the last release tag, and a shallow clone carries
+          # no tag to describe
           fetch-depth: 0
 
       - name: Is the bundled lock behind a release
@@ -66,8 +61,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # an open bump stops the next one: the pull request a run that succeeded left, or
-          # the issue a failed recipe left, which is the loop saying it will not act again
+          # an open bump stops the next one: the pull request a run left, or the issue a
+          # failed recipe left
           open_prs=$(gh pr list --state open --label agent:authored --limit 100 \
             --json headRefName \
             --jq '[.[] | select(.headRefName | startswith("chore/bump-scaffold-"))] | length')
@@ -82,8 +77,7 @@ jobs:
           behind=""
           for pkg in $WATCHED; do
             latest=$(curl -fsSL "https://pypi.org/pypi/${pkg}/json" | jq -r '.info.version')
-            # the version line of the package's own table, which is what
-            # `bump-changelog-entry.cjs` reads too
+            # the version line of the package's own table
             locked=$(awk -v p="$pkg" '
               /^\[\[package\]\]/ { want=0 }
               $0 == "name = \"" p "\"" { want=1; next }
@@ -99,7 +93,6 @@ jobs:
             exit 0
           fi
 
-          # a whole sentence, because it opens every body this workflow writes
           if [ -n "$behind" ]; then
             why="A new release on PyPI started this: ${behind}."
           else
@@ -117,14 +110,9 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
 
-      # The entry is written against the last release, not against the tip this run is about
-      # to overwrite, so it states the whole unreleased delta and replaces what the bump
-      # before it wrote. Written against the tip, a second bump between two releases appends
-      # a second `Refreshed ...` line describing the same packages a version later.
-      #
-      # A branch with no release tag behind it, and a tag predating any of these five paths,
-      # both fall back to the tip. All five or none: two baselines in one entry read as
-      # packages arriving and going.
+      # The entry is written against the last release tag rather than the tip, so it states
+      # the whole unreleased delta and replaces what the bump before it wrote. All paths or
+      # none: two baselines in one entry read as packages arriving and going
       - name: Keep the state the entry is written against
         id: base
         if: steps.decide.outputs.bump == 'true'
@@ -133,8 +121,7 @@ jobs:
           rm -rf /tmp/bump-base /tmp/bump-tag
           mkdir -p /tmp/bump-base /tmp/bump-tag
 
-          # `git stash` would do the same for the tip and would also hide a failure. `skills/`
-          # is copied as a directory because the bullet names the skills that arrived and
+          # `skills/` is copied as a directory: the bullet names the skills that arrived and
           # went, and their names are the directory names under it
           cp uv.lock /tmp/bump-base/root.uv.lock
           cp "${SCAFFOLD}/uv.lock" /tmp/bump-base/scaffold.uv.lock
@@ -152,9 +139,8 @@ jobs:
             && git show "${tag}:scripts/generate_skills.py" > /tmp/bump-tag/generate_skills.py \
             && git archive "$tag" skills | tar -xf - -C /tmp/bump-tag
           then
-            # the tip's copy is replaced rather than merged into: a skill directory the tip
-            # holds and the tag does not would survive a merge, and the bullet would not name
-            # it as one this span added
+            # replaced rather than merged into: a skill directory the tip holds and the tag
+            # does not would survive a merge and go unnamed
             rm -rf /tmp/bump-base
             mv /tmp/bump-tag /tmp/bump-base
             against="$tag"
@@ -166,10 +152,8 @@ jobs:
           echo "against=${against}" >> "$GITHUB_OUTPUT"
 
       # one step, because a step's own name is not readable from a later one and the failure
-      # report has to name the command that failed
-      #
-      # the order is fail-fast rather than `make ci`'s: `test-integration` invokes the real
-      # CLI and a `uv sync`, so a drift found here costs minutes less than one found there
+      # report has to name the command that failed. The order is fail-fast rather than
+      # `make ci`'s: `test-integration` invokes the real CLI and a `uv sync`
       - name: Run the bump recipe
         id: recipe
         if: steps.decide.outputs.bump == 'true'
@@ -193,8 +177,7 @@ jobs:
           run "make dev" make dev
           run "make lock-upgrade" make lock-upgrade
           run "make scaffold-lock-upgrade" make scaffold-lock-upgrade
-          # expected to fail after a dlt release that changed `workspace_deps()`, so not
-          # run through `run`
+          # expected to fail after a dlt release that changed `workspace_deps()`
           if make scaffold-deps-check; then
             echo "scaffold deps already match dlt's workspace_deps()"
           else
@@ -204,9 +187,49 @@ jobs:
           fi
           run "make scaffold-lock-check" make scaffold-lock-check
           run "make update-skills" make update-skills
-          # `make check-skills` is not run here, and nor is any other target that reads
-          # `git status`: the recipe has just rewritten the files those targets compare
-          # against the index. `make ci` runs them, after the commit below
+          # no `make check-skills` here, nor any target reading `git status`: the recipe has
+          # just rewritten the files they compare against the index. `make ci` runs them later
+
+      # A package resolved at two versions installs the older one for whoever the
+      # `resolution-markers` select. Refused rather than reported: the fix is narrowing
+      # `requires-python` in the bundled workspace, which is a person's call
+      - name: Refuse a bundled lock that forked a package
+        if: steps.decide.outputs.bump == 'true'
+        run: |
+          set -euo pipefail
+          printf '%s\n' "checking the bundled lock for a forked package" > /tmp/bump-failed-step
+
+          # `[[package]]` names are the only ones at the start of a line: a dependency is an
+          # inline table inside an array and a wheel carries a url rather than a name
+          forked=$(grep '^name = ' "${SCAFFOLD}/uv.lock" | sort | uniq -d \
+            | sed 's/^name = "//; s/"$//')
+          if [ -z "$forked" ]; then
+            echo "::notice::every package in the bundled lock resolves to one version."
+            rm -f /tmp/bump-failed-step
+            exit 0
+          fi
+
+          {
+            echo "The bundled workspace lock resolves these packages at more than one version:"
+            echo
+            for pkg in $forked; do
+              versions=$(awk -v p="$pkg" '
+                $0 == "name = \"" p "\"" { want=1; next }
+                want && /^version = / { gsub(/^version = "|"$/, ""); print; want=0 }
+              ' "${SCAFFOLD}/uv.lock" | paste -sd, - | sed 's/,/, /g')
+              echo "  ${pkg}: ${versions}"
+            done
+            echo
+            echo "A workspace installs the older one wherever the newer release has dropped a"
+            echo "Python version that is still claimed in requires-python here:"
+            echo
+            echo "  ${SCAFFOLD}/pyproject.toml"
+            echo
+            echo "Narrowing that is the fix, and it is a person's call."
+          } > /tmp/bump-failed-log
+          cat /tmp/bump-failed-log
+          echo "::error::the bundled lock forked $(echo "$forked" | paste -sd, - | sed 's/,/, /g')"
+          exit 1
 
       - name: Write the changelog entry
         id: entry
@@ -240,9 +263,8 @@ jobs:
           code=$?
           set -e
 
-          # exit 1 is the script saying this run adds nothing to `## [Unreleased]`: either no
-          # package version moved at all, or the entry it renders is the one the bump before
-          # it left there. A lock rewritten for its metadata alone produces both. A bump with
+          # exit 1 is the script saying this run adds nothing to `## [Unreleased]`: no
+          # version moved, or the entry is the one the bump before it left. A bump with
           # nothing to say opens nothing
           if [ "$code" != "0" ]; then
             echo "::warning::the recipe rewrote a lock and nothing it moved is new to \`## [Unreleased]\`, so there is no pull request to open."
@@ -254,9 +276,9 @@ jobs:
           cat /tmp/bump-entry.md
           echo "wrote=true" >> "$GITHUB_OUTPUT"
 
-      # before `make ci`, because `check-skills` inside it is `git status --porcelain --
-      # skills` and the recipe has just regenerated that directory. Nothing is pushed here,
-      # so a red `make ci` still leaves the target as it was
+      # before `make ci`, whose `check-skills` reads `git status` over the directory the
+      # recipe has just regenerated. Nothing is pushed here, so a red `make ci` leaves the
+      # target as it was
       - name: Commit the bump
         if: steps.entry.outputs.wrote == 'true'
         env:
@@ -325,8 +347,7 @@ jobs:
           } > /tmp/bump-pr.md
 
           # the tier and the reviewer request are normally the review pass's, and that pass
-          # cannot run in a public repository. the logins are a literal because a workflow
-          # reads no profile, and a test holds them equal to the profile's `low` tier
+          # cannot run here. the logins are a literal, held equal to the profile by a test
           pr=$(gh pr create --base "$BASE" --head "$BRANCH" \
             --title 'chore: refresh the bundled workspace lock' \
             --label agent:authored --label risk:low \
@@ -344,12 +365,9 @@ jobs:
             echo "::notice::reviewers requested on #${pr}: ${requested}"
           fi
 
-          # no reviewing pass is dispatched here. This repository is public, so it receives
-          # the parts of the loop that need no agent and none of the workflow files a pass
-          # runs from: the loop's own repository is private, GitHub shares a private
-          # repository's actions with private consumers only, and such a run dies before its
-          # first step. The reviewer requested above is who reads this. Restore the dispatch
-          # when a stage can run here.
+          # no reviewing pass is dispatched: this repository is public and the loop's own
+          # repository is private, so a stage run here dies before its first step. The
+          # reviewer requested above is who reads this
 
       # stops the next hourly run too: the decide step reads an open issue as a bump in
       # flight

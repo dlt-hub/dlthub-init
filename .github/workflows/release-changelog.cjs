@@ -5,10 +5,9 @@
 // version heading, and `--notes` reads that heading's section back out as the body of the
 // GitHub release.
 //
-// `--cut` is the inverse of `insertEntry` in `bump-changelog-entry.cjs`. That one keeps
-// `[Unreleased]` holding one bullet per thing a bump changes; this one draws a line under
-// everything there and leaves the heading empty for the next bump. Emptying it is also what
-// makes the next bump's entry start from this release rather than restate it.
+// `--cut` is the inverse of `insertEntry` in `bump-changelog-entry.cjs`: it draws a line
+// under what is there and leaves the heading empty, which is also what makes the next
+// bump's entry start from this release rather than restate it.
 
 const fs = require('node:fs');
 
@@ -34,9 +33,9 @@ function sectionBody(lines, at) {
 }
 
 /**
- * Whether a `### ` heading holds at least one line of its own. A block of headings with
- * nothing under them is what a half-finished edit leaves, and it is the one shape a grep for
- * `###` would read as something to release.
+ * Whether a `### ` heading holds at least one line of its own. Headings with nothing under
+ * them are what a half-finished edit leaves, and a grep for `###` would read them as
+ * something to release.
  */
 function hasEntries(body) {
   let under = false;
@@ -55,15 +54,15 @@ function cut(changelog, version, date) {
     throw new Error(`the changelog already carries a \`## [${version}]\` heading`);
   }
   if (!hasEntries(sectionBody(lines, at))) {
-    // its own exit code, so the workflow can tell "there is nothing to release yet", which is
-    // an answer, from a changelog it could not read, which is a defect
+    // its own exit code, so the workflow can tell "nothing to release yet" from a changelog
+    // it could not read
     throw Object.assign(
       new Error('`## [Unreleased]` holds no entries, so there is nothing to release'),
       { code: EMPTY },
     );
   }
-  // the heading goes *under* `[Unreleased]`, so the sections already written drop beneath it
-  // and `[Unreleased]` stays, empty, for the next bump to write into
+  // the heading goes *under* `[Unreleased]`, so the sections already written drop beneath
+  // it and the heading stays, empty, for the next bump
   lines.splice(at + 1, 0, '', `## [${version}] - ${date}`);
   return lines.join('\n');
 }

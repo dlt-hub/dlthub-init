@@ -1,15 +1,10 @@
 # Installed by the engineering agent loop. Edit it in dlt-hub/engineering-agent-loop, not
-# here. Two halves of the release recipe, neither of which calls a model.
-#
-# `open` runs the version bump and opens the release pull request. A person dispatches it,
-# because a release is a deliberate act and the bump merging on whatever cadence the package
-# index moves is not a release cadence.
-#
-# `tag` follows that pull request into the default branch and creates the GitHub release from
-# the changelog section the first half wrote.
+# here. The two halves of the release recipe, neither of which calls a model. `open` moves
+# the version and opens the release pull request; `tag` follows it into the default branch
+# and creates the GitHub release from the changelog section `open` wrote.
 #
 # Uploading to PyPI stays a person's act: `make publish` reads a token from an interactive
-# prompt and `require-posthog-key` reads a key out of an untracked `.make.env`.
+# prompt.
 name: release-dlthub-init
 
 on:
@@ -21,10 +16,10 @@ on:
         options: [patch, minor, major]
         default: patch
   push:
-    # the profile's `base`. A release is tagged where it merges, and nowhere else
+    # a release is tagged where it merges, and nowhere else
     branches: [devel]
-    # the version lives in this file, so a release cannot merge without moving it. Every
-    # other merge here, a bump among them, starts no run at all
+    # the version lives in this file, so a release cannot merge without moving it, and every
+    # other merge here starts no run at all
     paths: [pyproject.toml]
 
 permissions:
@@ -37,7 +32,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ---- the release pull request -------------------------------------------------------
   open:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -70,8 +64,7 @@ jobs:
             exit 0
           fi
 
-          # not a refusal: releasing with a bump still open is a choice, and the person who
-          # dispatched this is the one making it
+          # not a refusal: releasing with a bump still open is the dispatcher's choice
           open_bumps=$(gh pr list --state open --label agent:authored --limit 100 \
             --json number,headRefName \
             --jq '[.[] | select(.headRefName | startswith("chore/bump-scaffold-")) | .number] | join(", ")')
@@ -89,8 +82,8 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
 
-      # `uv version --bump <level> --no-sync`, which its own help calls CI-friendly. It moves
-      # `pyproject.toml` and `uv.lock` together, which is why `make lock-check` follows
+      # `uv version --bump <level> --no-sync` moves `pyproject.toml` and `uv.lock` together,
+      # which is why `make lock-check` follows
       - name: Bump the version
         id: version
         if: steps.decide.outputs.go == 'true'
@@ -98,16 +91,15 @@ jobs:
           LEVEL: ${{ inputs.level }}
         run: |
           set -euo pipefail
-          # no `make dev`: `uv version` and `uv lock --check` both read the project rather
-          # than the environment, so nothing here needs a synced venv
+          # no `make dev`: `uv version` and `uv lock --check` read the project rather than
+          # the environment
           make "version-upgrade-${LEVEL}"
           version=$(uv version --short)
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "::notice::the version is now ${version}"
 
-      # the heading goes *under* `## [Unreleased]`, so that heading stays and empties and the
-      # sections the bumps wrote drop beneath the new version. An empty `[Unreleased]` is
-      # exit 3, which is this workflow's one quiet stop
+      # the heading goes *under* `## [Unreleased]`, so that heading stays and empties and
+      # the bumps' sections drop beneath the new version. An empty `[Unreleased]` is exit 3
       - name: Cut the changelog
         id: cut
         if: steps.decide.outputs.go == 'true'
@@ -115,8 +107,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -uo pipefail
-          # read once and carried, so the heading the pull request quotes is the heading that
-          # was written even when a run straddles midnight
+          # read once, so a run straddling midnight quotes the heading it wrote
           date=$(date -u +%Y-%m-%d)
           echo "date=${date}" >> "$GITHUB_OUTPUT"
           set +e
@@ -134,8 +125,8 @@ jobs:
           cat /tmp/release-notes.md
           echo "cut=true" >> "$GITHUB_OUTPUT"
 
-      # the recipe's own guard, and the one thing `uv version` can get wrong. The branch's own
-      # CI runs the whole of `make ci` after the push
+      # the one thing `uv version` can get wrong. The branch's own CI runs the whole of
+      # `make ci` after the push
       - name: make lock-check
         if: steps.cut.outputs.cut == 'true'
         run: make lock-check
@@ -186,8 +177,7 @@ jobs:
           git push -q origin "$branch"
 
           # the tier and the reviewer request are normally the review pass's, and that pass
-          # cannot run in a public repository. the logins are a literal because a workflow
-          # reads no profile, and a test holds them equal to the profile's `low` tier
+          # cannot run here. the logins are a literal, held equal to the profile by a test
           pr=$(gh pr create --base "$BASE" --head "$branch" \
             --title "Release v${VERSION}" \
             --label agent:authored --label risk:low \
@@ -205,11 +195,9 @@ jobs:
             echo "::notice::reviewers requested on #${pr}: ${requested}"
           fi
 
-  # ---- the GitHub release -------------------------------------------------------------
-  #
   # Keyed on the state of the default branch rather than on which pull request merged: the
-  # version has a changelog heading and no tag exactly when a release has merged and not been
-  # tagged, whichever way it was merged. Every other push here reads one tag and stops.
+  # version has a changelog heading and no tag exactly when a release has merged and has
+  # not been tagged. Every other push here reads one tag and stops
   tag:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -231,8 +219,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # the `version` of the `[project]` table, without a TOML parser for the reason
-          # `bump-changelog-entry.cjs` has none
+          # the `version` of the `[project]` table, without a TOML parser
           version=$(awk '
             /^\[/ { want = ($0 == "[project]") }
             want && /^version = / { gsub(/^version = "|"$/, ""); print; exit }
@@ -257,8 +244,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "release=true" >> "$GITHUB_OUTPUT"
 
-      # `gh release create` creates the tag at `--target` when none exists, which is the two
-      # steps the recipe runs by hand
+      # `gh release create` creates the tag at `--target` when none exists
       - name: Tag the merge commit and create the release
         if: steps.decide.outputs.release == 'true'
         env:

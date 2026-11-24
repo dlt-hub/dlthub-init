@@ -4,16 +4,13 @@
 // here. Writes a dependency bump's changelog entry from the two `uv.lock` files, as a draft
 // the reviewing pass then holds to the diff.
 //
-// The `--*-before` state the caller passes is the last release, not the tip the recipe just
-// overwrote, so the entry is the whole account of what is unreleased. That is what lets a
-// second bump before a release replace the bullets the bump before it wrote: both describe
-// the same span, one of them a bump out of date. Appending instead grew `[Unreleased]` a
-// second `Refreshed ...` line per run.
+// The `--*-before` state the caller passes is the last release rather than the tip, so the
+// entry is the whole account of what is unreleased and a second bump before a release
+// replaces the bullets the bump before it wrote.
 
 const fs = require('node:fs');
 
-// not a TOML parser: every package is a `[[package]]` table whose first two keys are `name`
-// and `version`, and a parser would be a dependency in a file that must have none
+// not a TOML parser: a parser would be a dependency in a file that must have none
 function parseLock(text) {
   const versions = new Map();
   let name = null;
@@ -91,11 +88,21 @@ function directSpecs(text) {
 }
 
 /**
+ * The packages a bump watches, named in the entry whether or not a pyproject holds them.
+ *
+ * `lockBullet` counts a transitive, and a package the whole bump exists for can be one: a
+ * scaffold reaching `dlthub-client` through `dlt[hub]` would have it counted among hundreds.
+ */
+function alsoNamed(value) {
+  return new Set(String(value || '').split(',')
+    .map((n) => n.trim()).filter(Boolean).map(normalise));
+}
+
+/**
  * The skills a `skills/` directory holds, or null where the caller named no such directory.
  *
- * A skill is one directory: `.gitkeep` and anything else loose beside them is not one. Null
- * rather than an empty list, because a baseline that is not there read as "no skills" reports
- * every skill in the repository as one this bump added.
+ * A skill is one directory. Null rather than an empty list: a missing baseline read as "no
+ * skills" reports every skill in the repository as one this bump added.
  */
 function skillNames(dir) {
   if (!dir || !fs.existsSync(dir)) return null;
@@ -107,23 +114,24 @@ function skillNames(dir) {
 
 const versions = (list) => list.map((p) => `\`${p.name}\` ${p.from} → ${p.to}`);
 
-// How each of the four bullets opens. A second bump finds the first one's lines by these, so
-// rewording one here is what rewords it everywhere, and a line a person wrote is left alone
-// because it opens with something else
+// How each bullet opens. A second bump finds the first one's lines by these, and a line a
+// person wrote is left alone because it opens with something else
 const LEADS = {
   scaffold: 'Refreshed the bundled minimal workspace `uv.lock` to the latest'
     + ' within-constraint versions',
   root: 'Refreshed the root `uv.lock` to the latest within-constraint versions',
   deps: "Synced the bundled minimal workspace dependencies with dlt's `workspace_deps()`",
   skills: 'Refreshed the bundled skills to workbench',
+  session: 'Re-stamped the bundled notebook session snapshot to marimo',
 };
 
 /** Whether a changelog line is a bullet an earlier run of this script wrote. */
 const isOwnBullet = (line) => Object.values(LEADS).some((lead) => line.startsWith(`- ${lead}`));
 
 /** The `LEADS` keys a run was given both sides of, which are the bullets it may replace. */
-function askedAbout({ scaffold, root, deps, skills }) {
-  return Object.keys(LEADS).filter((kind) => ({ scaffold, root, deps, skills })[kind]);
+function askedAbout({ scaffold, root, deps, skills, session }) {
+  const given = { scaffold, root, deps, skills, session };
+  return Object.keys(LEADS).filter((kind) => given[kind]);
 }
 
 /** "a", "a and b", "a, b and c" — the last separator is the one a reader expects. */
@@ -136,11 +144,9 @@ const plural = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
 const skillList = (names) => sentenceList(names.map((n) => `\`${n}\``));
 
-// Direct dependencies are named and transitives are counted, which is the shape of every
-// released entry. It applies to a package arriving and leaving as much as to one moving
-// version: a transitive that left is the resolver's business, and naming thirteen of them
-// repeats, in a bullet about a lock, what the person who removed the dependency already
-// wrote in `### Removed`.
+// Direct dependencies are named and transitives are counted, for a package arriving and
+// leaving as much as for one moving version: a transitive that left is the resolver's
+// business, and naming thirteen repeats what `### Removed` already says
 function lockBullet({ lead, diff, direct }) {
   const split = (list) => {
     const named = list.filter((p) => direct.has(p.name));
@@ -170,7 +176,9 @@ function lockBullet({ lead, diff, direct }) {
   return `- ${parts.join('')}.`;
 }
 
-function renderEntry({ scaffold, root, direct, rootDirect = null, deps = null, skills = null }) {
+function renderEntry({
+  scaffold, root, direct, rootDirect = null, deps = null, skills = null, session = null,
+}) {
   const bullets = [];
   if (scaffold && scaffold.moved.length + scaffold.added.length + scaffold.removed.length) {
     bullets.push(lockBullet({ lead: LEADS.scaffold, diff: scaffold, direct }));
@@ -187,10 +195,9 @@ function renderEntry({ scaffold, root, direct, rootDirect = null, deps = null, s
   if (root && root.moved.length + root.added.length + root.removed.length) {
     bullets.push(lockBullet({ lead: LEADS.root, diff: root, direct: rootDirect || direct }));
   }
-  // The generator rewrites `skills/` whole at each ref, so a moved ref can add or drop a whole
-  // skill that everybody running `uvx dlthub-init` then gets. A seven-character SHA says none
-  // of that. What changed inside a skill that was already there is a person's to describe, as
-  // it is in the released entries.
+  // The generator rewrites `skills/` whole at each ref, so a moved ref can add or drop a
+  // skill, and a seven-character SHA says none of that. What changed inside one that was
+  // already there is a person's to describe
   if (skills && skills.from !== skills.to) {
     const said = [];
     if (skills.added && skills.added.length) said.push(`adding ${skillList(skills.added)}`);
@@ -200,17 +207,20 @@ function renderEntry({ scaffold, root, direct, rootDirect = null, deps = null, s
     const tail = said.length ? `, ${said.join(', ')}` : '';
     bullets.push(`- ${LEADS.skills} \`${skills.to}\`${tail}.`);
   }
+  // The snapshot records the marimo its cell outputs were built with, and a pin past it
+  // drops those outputs back to a live kernel run. Where the scaffold names `marimo`
+  // directly the lock bullet already carries the pair, so this names only what it is now
+  if (session && session.from !== session.to) {
+    bullets.push(`- ${LEADS.session} \`${session.to}\`.`);
+  }
   return bullets;
 }
 
-// Into the existing `### Changed` block under `[Unreleased]`, so a second bump opens no
-// second heading, and in place of the bullets an earlier bump left there: both state what is
-// unreleased and only the new ones are current. A line a person wrote stays where it is.
-// Every released heading below is what the next release moves, and that is a person's act.
+// Into the existing `### Changed` block under `[Unreleased]`, in place of the bullets an
+// earlier bump left there. A line a person wrote stays where it is.
 //
-// `replaces` is which of the four a run computed, so a bullet that came out empty is dropped
-// and one the caller was not asked about is left standing. The two look the same in
-// `bullets` and mean opposite things
+// `replaces` is which kinds a run computed, so a bullet that came out empty is dropped and
+// one the caller was not asked about is left standing. The two look the same in `bullets`
 function insertEntry(changelog, bullets, replaces = Object.keys(LEADS)) {
   if (!bullets.length) return changelog;
   const lines = String(changelog).split('\n');
@@ -232,8 +242,7 @@ function insertEntry(changelog, bullets, replaces = Object.keys(LEADS)) {
     .filter((l) => !stale.some((lead) => l.startsWith(lead)));
   while (kept.length && !kept[0].trim()) kept.shift();
   while (kept.length && !kept[kept.length - 1].trim()) kept.pop();
-  // the trailing blank is the one separating this block from the `###` or `##` after it, and
-  // the file's own last newline where `[Unreleased]` is the only section
+  // the trailing blank separates this block from the `###` or `##` after it
   lines.splice(changed + 1, blockEnd - changed - 1, ...kept, ...bullets, '');
   return lines.join('\n');
 }
@@ -249,7 +258,16 @@ function main(argv, io = console) {
     ? diffLocks(parseLock(read(before)), parseLock(read(after)))
     : null);
 
+  // both sets: which lock a package turns up in does not decide whether a reader wants it
+  // named
+  const also = alsoNamed(value('--also-name'));
   const direct = directNames(read(value('--direct')));
+  const rootDirect = value('--root-direct') ? directNames(read(value('--root-direct'))) : null;
+  for (const name of also) {
+    direct.add(name);
+    if (rootDirect) rootDirect.add(name);
+  }
+
   const depsBefore = value('--deps-before');
   const depsAfter = value('--deps-after');
   let deps = null;
@@ -263,6 +281,8 @@ function main(argv, io = console) {
         .sort().map((name) => ({ name, from: was.get(name), to: now.get(name) })),
     };
   }
+  const sessionFrom = value('--session-before');
+  const sessionTo = value('--session-after');
   const skillsFrom = value('--skills-before');
   const skillsTo = value('--skills-after');
   const skillDirs = [value('--skills-dir-before'), value('--skills-dir-after')];
@@ -282,9 +302,10 @@ function main(argv, io = console) {
     scaffold: lockDiff(value('--scaffold-before'), value('--scaffold-after')),
     root: lockDiff(value('--root-before'), value('--root-after')),
     direct,
-    rootDirect: value('--root-direct') ? directNames(read(value('--root-direct'))) : null,
+    rootDirect,
     deps,
     skills: skillsFrom && skillsTo ? { from: skillsFrom, to: skillsTo, ...skillDiff } : null,
+    session: sessionFrom && sessionTo ? { from: sessionFrom, to: sessionTo } : null,
   };
   const bullets = renderEntry(entry);
 
@@ -297,8 +318,8 @@ function main(argv, io = console) {
   if (changelog) {
     const was = fs.readFileSync(changelog, 'utf8');
     const now = insertEntry(was, bullets, askedAbout(entry));
-    // the bullets an earlier bump wrote, recomputed against the same release and come out
-    // the same: this run rewrote a lock without moving a version anybody reads
+    // recomputed against the same release and unchanged: this run rewrote a lock without
+    // moving a version anybody reads
     if (now === was) {
       io.error('bump-changelog-entry: the entry is already under `## [Unreleased]`, so this'
         + ' run has nothing new to say');
@@ -315,5 +336,5 @@ if (require.main === module) process.exit(main(process.argv.slice(2)));
 
 module.exports = {
   LEADS, isOwnBullet, askedAbout, parseLock, normalise, diffLocks, directNames, directSpecs,
-  skillNames, lockBullet, renderEntry, insertEntry, main,
+  alsoNamed, skillNames, lockBullet, renderEntry, insertEntry, main,
 };
